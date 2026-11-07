@@ -71,12 +71,41 @@ export interface TaskData {
  * - `callout_offset` with `y > 0`: a callout below the bar;
  * - `callout_offset` with `y ≤ 0`: a callout above the bar.
  */
-export interface EntryData {
+export interface TaskEntryData {
   task: Id;
   /** 0-based bar line, for an entry on the bar. Default: 0. Not allowed with `callout_offset`. */
   line?: number;
   /** Makes the entry a callout, and places its label (see `Offset`). */
   callout_offset?: Offset;
+}
+
+/** Shows a (non-global) marker on this timeline. */
+export interface MarkerEntryData {
+  marker: Id;
+}
+
+/** An entry is a task on the timeline, or a marker shown on it. */
+export type EntryData = TaskEntryData | MarkerEntryData;
+
+/**
+ * A date marker: a vertical line at `date` across the bars of the timelines
+ * that show it, with a label at its top or bottom end.
+ */
+export interface MarkerData {
+  id: Id;
+  text: string;
+  /** ISO 8601: `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm`. */
+  date: string;
+  /** `true`: shown on every timeline. `false` (default): only on timelines with a `{ marker: id }` entry. */
+  global?: boolean;
+  /** Any CSS color. Default: the theme's `--tlv-marker` (red). */
+  color?: string;
+  /**
+   * Places the label, like `callout_offset`: px from the line's end on the
+   * bar's edge to the label. `y ≤ 0`: above the topmost bar; `y > 0`: below
+   * the bottommost. Default: `{ x: 0, y: -16 }`.
+   */
+  marker_offset?: Offset;
 }
 
 export interface TimelineData {
@@ -94,6 +123,8 @@ export interface TimelineViewData {
   view: ViewData;
   tasks: TaskData[];
   timelines: TimelineData[];
+  /** Date markers. Optional. */
+  markers?: MarkerData[];
 }
 
 /** Body of `PATCH .../entries/{task_id}`, minus `version`. Send only what changes. */

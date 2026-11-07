@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatDate } from "./dates";
 import { MoveError, TimelineModel, lineCount, viewRange } from "./model";
-import type { TimelineData, TimelineViewData } from "./types";
+import type { TaskEntryData, TimelineData, TimelineViewData } from "./types";
 
 function sample(): TimelineViewData {
   return {
@@ -29,7 +29,7 @@ function sample(): TimelineViewData {
 }
 
 const entries = (m: TimelineModel, timelineId: number) =>
-  m.toData().timelines.find((t) => t.id === timelineId)!.entries;
+  m.toData().timelines.find((t) => t.id === timelineId)!.entries as TaskEntryData[];
 const entry = (m: TimelineModel, timelineId: number, task: number) =>
   entries(m, timelineId).find((e) => e.task === task);
 
@@ -49,6 +49,42 @@ describe("fromData", () => {
     expect(out.timelines).toEqual(data.timelines);
     // finish_date is derived, so it is not written back for tasks.
     expect(out.tasks).toEqual(data.tasks);
+  });
+
+  it("reads and writes markers and marker entries", () => {
+    const data = sample();
+    data.markers = [
+      { id: 1, text: "Today", date: "2026-03-20", color: "blue" },
+      { id: 2, text: "Freeze", date: "2026-04-15", global: true, marker_offset: { x: 5, y: 20 } },
+    ];
+    data.timelines[0].entries.push({ marker: 1 });
+    const m = TimelineModel.fromData(data);
+    expect(m.findTimeline(1)!.markers).toEqual([1]);
+    expect(m.findTimeline(1)!.entries).toHaveLength(3); // the task entries only
+    const out = m.toData();
+    expect(out.markers).toEqual([
+      { id: 1, text: "Today", date: "2026-03-20", color: "blue", marker_offset: { x: 0, y: -16 } },
+      { id: 2, text: "Freeze", date: "2026-04-15", global: true, marker_offset: { x: 5, y: 20 } },
+    ]);
+    expect(out.timelines[0].entries.at(-1)).toEqual({ marker: 1 });
+    // Without markers, none are written.
+    expect(TimelineModel.fromData(sample()).toData()).not.toHaveProperty("markers");
+  });
+
+  it("rejects invalid markers", () => {
+    const withMarker = (change: (d: TimelineViewData) => void) => () => {
+      const data = sample();
+      data.markers = [{ id: 1, text: "Today", date: "2026-03-20" }];
+      change(data);
+      return TimelineModel.fromData(data);
+    };
+    expect(withMarker((d) => (d.markers![0].date = "20-03-2026"))).toThrow();
+    expect(withMarker((d) => d.markers!.push({ id: 1, text: "Again", date: "2026-03-21" }))).toThrow(/Duplicate marker/);
+    expect(withMarker((d) => (d.markers![0].color = "red;"))).toThrow(/color/);
+    expect(withMarker((d) => (d.markers![0].marker_offset = { x: 0 } as never))).toThrow(/marker_offset/);
+    expect(withMarker((d) => d.timelines[0].entries.push({ marker: 9 }))).toThrow(/unknown marker/);
+    expect(withMarker((d) => d.timelines[0].entries.push({ marker: 1 }, { marker: 1 }))).toThrow(/more than once/);
+    expect(withMarker((d) => d.timelines[0].entries.push({ marker: 1, line: 0 } as never))).toThrow(/only `marker`/);
   });
 
   it("keeps a task's color", () => {
@@ -86,7 +122,7 @@ describe("fromData", () => {
     const data = sample();
     expect(lineCount(TimelineModel.fromData(data).findTimeline(1)!)).toBe(2);
     expect(lineCount(TimelineModel.fromData(data).findTimeline(2)!)).toBe(1);
-    data.timelines[0].entries[0].line = 5;
+    (data.timelines[0].entries[0] as TaskEntryData).line = 5;
     expect(lineCount(TimelineModel.fromData(data).findTimeline(1)!)).toBe(6);
   });
 
@@ -100,12 +136,12 @@ describe("fromData", () => {
       (d) => (d.tasks[0].duration = "2 days"),
       (d) => (d.tasks[0].color = "red; display: none"),
       (d) => (d.tasks[0].color = 5 as never),
-      (d) => (d.timelines[0].entries[0].task = 99),
+      (d) => ((d.timelines[0].entries[0] as TaskEntryData).task = 99),
       (d) => d.timelines[0].entries.push({ task: 1 }),
-      (d) => (d.timelines[0].entries[0].callout_offset = { x: 1, y: 1 }),
-      (d) => (d.timelines[0].entries[0].line = -1),
-      (d) => (d.timelines[0].entries[1].line = 0),
-      (d) => (d.timelines[0].entries[1].callout_offset = { x: "a", y: 5 } as never),
+      (d) => ((d.timelines[0].entries[0] as TaskEntryData).callout_offset = { x: 1, y: 1 }),
+      (d) => ((d.timelines[0].entries[0] as TaskEntryData).line = -1),
+      (d) => ((d.timelines[0].entries[1] as TaskEntryData).line = 0),
+      (d) => ((d.timelines[0].entries[1] as TaskEntryData).callout_offset = { x: "a", y: 5 } as never),
     ];
     for (const mutate of cases) {
       const data = sample();

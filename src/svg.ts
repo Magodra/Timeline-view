@@ -245,24 +245,33 @@ function drawCalloutArea(out: SvgWriter, area: HTMLElement): void {
   const above = area.classList.contains("tlv-area--above");
   const edgeY = above ? ab.y + ab.height : ab.y;
 
+  /** A label's connector: the same geometry layoutConnectors() gives it. */
+  const drawConnector = (box: HTMLElement, connector: HTMLElement) => {
+    if (connector.hidden) return;
+    const x = Number(box.dataset.x);
+    const y = Number(box.dataset.y);
+    const reach = Number(box.dataset.reach);
+    const sx = ab.x + Number(box.dataset.at) * ab.width;
+    const sy = above ? edgeY - reach : edgeY + reach;
+    const tx = Math.min(Math.max(0, x), x + box.offsetWidth);
+    const dy = above ? y + reach : y - reach;
+    const cs = getComputedStyle(connector);
+    // Callout connectors are dashed; a marker's is solid, like its line.
+    const dash = connector.classList.contains("tlv-connector--marker") ? "" : ` stroke-dasharray="3 3"`;
+    out.add(
+      `<line x1="${num(sx)}" y1="${num(sy)}" x2="${num(sx + tx)}" y2="${num(sy + dy)}" stroke="${cs.borderTopColor}"${dash}/>`,
+    );
+  };
+
+  for (const box of area.querySelectorAll<HTMLElement>(".tlv-marker-label")) {
+    drawConnector(box, box.previousElementSibling as HTMLElement);
+    drawLabelBox(out, box);
+  }
+
   for (const box of area.querySelectorAll<HTMLElement>(".tlv-callout")) {
     const connector = box.previousElementSibling as HTMLElement;
     const marker = connector.previousElementSibling as HTMLElement;
-
-    // Connector: the same geometry layoutConnectors() gives the dashed line.
-    if (!connector.hidden) {
-      const x = Number(box.dataset.x);
-      const y = Number(box.dataset.y);
-      const reach = Number(box.dataset.reach);
-      const sx = ab.x + Number(box.dataset.at) * ab.width;
-      const sy = above ? edgeY - reach : edgeY + reach;
-      const tx = Math.min(Math.max(0, x), x + box.offsetWidth);
-      const dy = above ? y + reach : y - reach;
-      const color = getComputedStyle(connector).borderTopColor;
-      out.add(
-        `<line x1="${num(sx)}" y1="${num(sy)}" x2="${num(sx + tx)}" y2="${num(sy + dy)}" stroke="${color}" stroke-dasharray="3 3"/>`,
-      );
-    }
+    drawConnector(box, connector);
 
     if (marker.classList.contains("tlv-edge-bar")) {
       const ms = getComputedStyle(marker);
@@ -275,18 +284,23 @@ function drawCalloutArea(out: SvgWriter, area: HTMLElement): void {
       drawSymbol(out, marker);
     }
 
-    const bs = getComputedStyle(box);
-    const bb = out.box(box);
-    const radius = parseFloat(bs.borderTopLeftRadius) || 0;
-    if (isVisible(bs.backgroundColor)) out.rect(bb, bs.backgroundColor, ` rx="${num(radius)}"`);
-    out.rect(
-      { x: bb.x + 0.5, y: bb.y + 0.5, width: bb.width - 1, height: bb.height - 1 },
-      "none",
-      ` rx="${num(radius)}" stroke="${bs.borderTopColor}"`,
-    );
-    out.text(box.querySelector(".tlv-callout-title"), bb);
-    out.text(box.querySelector(".tlv-callout-dates"), bb);
+    drawLabelBox(out, box);
   }
+}
+
+/** A callout or marker label: background, border and its two lines of text. */
+function drawLabelBox(out: SvgWriter, box: HTMLElement): void {
+  const bs = getComputedStyle(box);
+  const bb = out.box(box);
+  const radius = parseFloat(bs.borderTopLeftRadius) || 0;
+  if (isVisible(bs.backgroundColor)) out.rect(bb, bs.backgroundColor, ` rx="${num(radius)}"`);
+  out.rect(
+    { x: bb.x + 0.5, y: bb.y + 0.5, width: bb.width - 1, height: bb.height - 1 },
+    "none",
+    ` rx="${num(radius)}" stroke="${bs.borderTopColor}"`,
+  );
+  out.text(box.querySelector(".tlv-callout-title"), bb);
+  out.text(box.querySelector(".tlv-callout-dates"), bb);
 }
 
 /** Builds an SVG document of the view rendered in `root`. */
@@ -317,13 +331,21 @@ export function toSVG(root: HTMLElement): string {
     out.rect(nb, getComputedStyle(name).backgroundColor);
     out.text(name, nb);
 
-    drawBar(out, row.querySelector<HTMLElement>(".tlv-bar")!);
-    for (const area of row.querySelectorAll<HTMLElement>(".tlv-area")) drawCalloutArea(out, area);
-
+    // The border first: a marker line crossing into the next timeline goes over it.
     if (parseFloat(rs.borderBottomWidth) > 0) {
       const y = rb.y + rb.height - 0.5;
       out.add(`<line x1="${num(rb.x)}" y1="${num(y)}" x2="${num(rb.x + rb.width)}" y2="${num(y)}" stroke="${rs.borderBottomColor}"/>`);
     }
+
+    drawBar(out, row.querySelector<HTMLElement>(".tlv-bar")!);
+  }
+
+  // Marker lines cross the timelines: after all the bars, before the labels, which go on top.
+  for (const line of root.querySelectorAll<HTMLElement>(":scope > .tlv-marker-line")) {
+    out.rect(out.box(line), getComputedStyle(line).backgroundColor);
+  }
+  for (const row of root.querySelectorAll<HTMLElement>(".tlv-timeline")) {
+    for (const area of row.querySelectorAll<HTMLElement>(".tlv-area")) drawCalloutArea(out, area);
   }
   return out.toString();
 }

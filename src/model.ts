@@ -2,6 +2,8 @@ import { formatDate, parseDate } from "./dates";
 import { addDuration, isMilestoneDuration, parseDuration } from "./duration";
 import type {
   EntryData,
+  MarkerData,
+  TaskEntryData,
   Id,
   MilestoneSymbol,
   MovePatchData,
@@ -41,6 +43,16 @@ export interface Task {
   color?: string;
 }
 
+export interface Marker {
+  id: Id;
+  text: string;
+  date: Date;
+  global: boolean;
+  color?: string;
+  /** Label position; `y ≤ 0` above the topmost bar, `y > 0` below the bottommost. */
+  offset: Offset;
+}
+
 export type Entry =
   | { taskId: Id; placement: "on"; line: number }
   | { taskId: Id; placement: "above" | "below"; calloutOffset: Offset };
@@ -51,6 +63,8 @@ export interface Timeline {
   start: Date;
   finish: Date;
   entries: Entry[];
+  /** Ids of the (non-global) markers shown on this timeline. */
+  markers: Id[];
 }
 
 export interface MovePatch {
@@ -109,6 +123,7 @@ export class TimelineModel {
     public view: View,
     public tasks: Task[],
     public timelines: Timeline[],
+    public markers: Marker[] = [],
   ) {}
 
   static fromData(data: TimelineViewData): TimelineModel {
@@ -144,7 +159,14 @@ export class TimelineModel {
       seen.add(String(t.id));
     }
 
-    const model = new TimelineModel(view, tasks, []);
+    const markers = (data.markers ?? []).map(markerFromData);
+    const seenMarkers = new Set<string>();
+    for (const mk of markers) {
+      if (seenMarkers.has(String(mk.id))) throw new Error(`Duplicate marker id ${mk.id}`);
+      seenMarkers.add(String(mk.id));
+    }
+
+    const model = new TimelineModel(view, tasks, [], markers);
     model.timelines = (data.timelines ?? []).map((t) => model.timelineFromData(t));
     model.version = data.version;
     return model;
@@ -166,6 +188,7 @@ export class TimelineModel {
       },
       tasks: this.tasks.map(taskToData),
       timelines: this.timelines.map(timelineToData),
+      ...(this.markers.length > 0 && { markers: this.markers.map(markerToData) }),
     };
   }
 
@@ -174,7 +197,23 @@ export class TimelineModel {
     const start = parseDate(t.start_date);
     const finish = parseDate(t.finish_date);
     if (finish <= start) throw new Error(`Timeline ${t.id}: finish_date must be after start_date`);
-    const entries = (t.entries ?? []).map((e) => this.entryFromData(t.id, e));
+    const entries: Entry[] = [];
+    const markers: Id[] = [];
+    for (const e of t.entries ?? []) {
+      if (e !== null && typeof e === "object" && "marker" in e) {
+        const marker = this.findMarker(e.marker);
+        if (!marker) throw new Error(`Timeline ${t.id}: unknown marker ${e.marker}`);
+        if (Object.keys(e).some((k) => k !== "marker")) {
+          throw new Error(`Timeline ${t.id}: a marker entry has only \`marker\``);
+        }
+        if (markers.some((id) => sameId(id, marker.id))) {
+          throw new Error(`Timeline ${t.id}: marker ${marker.id} appears more than once`);
+        }
+        markers.push(marker.id);
+      } else {
+        entries.push(this.entryFromData(t.id, e));
+      }
+    }
     const seen = new Set<string>();
     for (const e of entries) {
       if (seen.has(String(e.taskId))) {
@@ -182,10 +221,10 @@ export class TimelineModel {
       }
       seen.add(String(e.taskId));
     }
-    return { id: t.id, name: t.name ?? "", start, finish, entries };
+    return { id: t.id, name: t.name ?? "", start, finish, entries, markers };
   }
 
-  private entryFromData(timelineId: Id, e: EntryData): Entry {
+  private entryFromData(timelineId: Id, e: TaskEntryData): Entry {
     const where = `Timeline ${timelineId}, task ${e.task}`;
     if (!this.findTask(e.task)) throw new Error(`${where}: unknown task`);
 
@@ -206,6 +245,19 @@ export class TimelineModel {
 
   findTask(id: Id): Task | undefined {
     return this.tasks.find((t) => sameId(t.id, id));
+  }
+
+  /** Moves a marker's label. `y ≤ 0` puts it above the topmost bar, `y > 0` below the bottommost. */
+  setMarkerOffset(id: Id, offset: Offset): Marker {
+    const marker = this.findMarker(id);
+    if (!marker) throw new MoveError("not_found", `Marker ${id} not found`);
+    if (!isOffset(offset)) throw new MoveError("invalid", "marker_offset needs numeric x and y");
+    marker.offset = { x: offset.x, y: offset.y === 0 ? 0 : offset.y };
+    return marker;
+  }
+
+  findMarker(id: Id): Marker | undefined {
+    return this.markers.find((mk) => sameId(mk.id, id));
   }
 
   findTimeline(id: Id): Timeline | undefined {
@@ -372,6 +424,39 @@ function isColor(value: string): boolean {
   return value.trim() !== "" && !/[;{}]/.test(value);
 }
 
+/** Default label position for a marker: just above the topmost bar. */
+const DEFAULT_MARKER_OFFSET: Offset = { x: 0, y: -DEFAULT_CALLOUT_GAP };
+
+function markerFromData(mk: MarkerData): Marker {
+  if (mk?.id === undefined || mk.id === null) throw new Error("Every marker needs an id");
+  const where = `Marker ${mk.id}`;
+  if (mk.global !== undefined && typeof mk.global !== "boolean") throw new Error(`${where}: global must be true or false`);
+  if (mk.color !== undefined && (typeof mk.color !== "string" || !isColor(mk.color))) {
+    throw new Error(`${where}: color must be a CSS color`);
+  }
+  const offset = mk.marker_offset ?? DEFAULT_MARKER_OFFSET;
+  if (!isOffset(offset)) throw new Error(`${where}: marker_offset needs numeric x and y`);
+  return {
+    id: mk.id,
+    text: mk.text ?? "",
+    date: parseDate(mk.date),
+    global: mk.global ?? false,
+    color: mk.color,
+    offset: { x: offset.x, y: offset.y === 0 ? 0 : offset.y },
+  };
+}
+
+function markerToData(mk: Marker): MarkerData {
+  return {
+    id: mk.id,
+    text: mk.text,
+    date: formatDate(mk.date),
+    ...(mk.global && { global: true }),
+    ...(mk.color !== undefined && { color: mk.color }),
+    marker_offset: { ...mk.offset },
+  };
+}
+
 function taskFromData(t: TaskData): Task {
   if (t.id === undefined || t.id === null) throw new Error("Every task needs an id");
   const start = parseDate(t.start_date);
@@ -408,11 +493,14 @@ export function timelineToData(t: Timeline): TimelineData {
     name: t.name,
     start_date: formatDate(t.start),
     finish_date: formatDate(t.finish),
-    entries: t.entries.map((e) =>
-      e.placement === "on"
-        ? { task: e.taskId, line: e.line }
-        : { task: e.taskId, callout_offset: { ...e.calloutOffset } },
-    ),
+    entries: [
+      ...t.entries.map((e): EntryData =>
+        e.placement === "on"
+          ? { task: e.taskId, line: e.line }
+          : { task: e.taskId, callout_offset: { ...e.calloutOffset } },
+      ),
+      ...t.markers.map((marker): EntryData => ({ marker })),
+    ],
   };
 }
 

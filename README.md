@@ -7,6 +7,7 @@ A timeline view for use in web planning applications. Framework-free TypeScript 
 - Several timelines stacked in one view, each with its own date range, on an hour, day, week, month or year scale.
 - Relative timelines that each fill the width, or absolute ones on a common time axis.
 - Arrows on tasks that continue past a timeline's range.
+- Date markers (such as "Today") across one, several or all timelines.
 - Tasks drawn as bars and milestones as symbols, on the bar or as callouts above and below it.
 - Drag and drop between lines, areas and timelines.
 - Export as SVG (`timeline.toSVG()`).

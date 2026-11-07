@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { TimelineViewData } from "./types";
+import type { TaskEntryData, TimelineViewData } from "./types";
 import { TimelineView, type MoveFailedEvent } from "./view";
 
 function sample(): TimelineViewData {
@@ -218,6 +218,92 @@ describe("timeline ranges", () => {
     // A callout's edge bar gets a pointed end instead.
     const edge = container.querySelector(".tlv-area--above .tlv-edge-bar")!;
     expect(edge.className).toBe("tlv-edge-bar tlv-edge-bar--after");
+  });
+});
+
+describe("markers", () => {
+  const data = (absolute = false): TimelineViewData => {
+    const d = sample();
+    d.view.absolute = absolute;
+    d.timelines.push(
+      { id: 2, name: "Two", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] },
+      { id: 3, name: "Three", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [{ marker: "today" }] },
+      { id: 4, name: "Four", start_date: "2026-06-01", finish_date: "2026-08-01", entries: [] },
+    );
+    d.timelines[0].entries.push({ marker: "today" });
+    d.markers = [
+      { id: "today", text: "Today", date: "2026-03-20" },
+      { id: "freeze", text: "Freeze", date: "2026-04-01", global: true, color: "blue", marker_offset: { x: 0, y: 20 } },
+    ];
+    return d;
+  };
+  /**
+   * A marker's line runs: each element as "from:top-to:bottom", where top and
+   * bottom say whether it starts and ends at a bar or runs on to the next timeline.
+   */
+  const runs = (marker: string) =>
+    [...container.querySelectorAll<HTMLElement>(`:scope > .tlv-marker-line[data-marker="${marker}"]`)].map(
+      (n) => `${n.dataset.from}:${n.dataset.top}-${n.dataset.to}:${n.dataset.bottom}`,
+    );
+  /** Where a marker's label is: "timeline/area". */
+  const labelAt = (marker: string) => {
+    const label = container.querySelector<HTMLElement>(`.tlv-marker-label[data-marker="${marker}"]`)!;
+    return `${label.closest<HTMLElement>(".tlv-timeline")!.dataset.timeline}/${label.parentElement!.dataset.placement}`;
+  };
+
+  it("draws one line from the topmost to the bottommost timeline showing the marker, with its label on top", () => {
+    new TimelineView("tl").parse(data());
+    // Timelines 1 and 3 show it; the line crosses timeline 2 between them.
+    expect(runs("today")).toEqual(["1:bar-3:bar"]);
+    expect(labelAt("today")).toBe("1/above");
+    expect(container.querySelector(".tlv-marker-label")!.textContent).toBe("Today2026-03-20");
+  });
+
+  it("draws a global marker on each timeline separately without absolute, skipping ranges without its date", () => {
+    new TimelineView("tl").parse(data());
+    // Each timeline has its own axis: a line and a label (below, as y > 0) per timeline.
+    // Timeline 4 (June to August) doesn't hold 2026-04-01.
+    expect(runs("freeze")).toEqual(["1:bar-1:bar", "2:bar-2:bar", "3:bar-3:bar"]);
+    const labels = [...container.querySelectorAll<HTMLElement>('.tlv-marker-label[data-marker="freeze"]')].map(
+      (n) => `${n.closest<HTMLElement>(".tlv-timeline")!.dataset.timeline}/${n.parentElement!.dataset.placement}`,
+    );
+    expect(labels).toEqual(["1/below", "2/below", "3/below"]);
+    const line = container.querySelector<HTMLElement>('.tlv-marker-line[data-marker="freeze"]')!;
+    expect(line.style.getPropertyValue("--tlv-marker")).toBe("blue");
+  });
+
+  it("breaks a marker's line where a timeline's own axis puts the date elsewhere", () => {
+    const d = data();
+    d.timelines[1].start_date = "2026-02-01"; // timeline 2: 2026-03-20 is at a different place
+    new TimelineView("tl").parse(d);
+    expect(runs("today")).toEqual(["1:bar-1:row", "2:row-2:row", "3:row-3:bar"]);
+  });
+
+  it("moves a marker's label with setMarkerOffset, between the top and bottom end, and reports it", () => {
+    const view = new TimelineView("tl");
+    view.parse(data());
+    const moved = vi.fn();
+    view.on("marker_moved", moved);
+
+    view.setMarkerOffset("today", { x: 12, y: 30 });
+    expect(labelAt("today")).toBe("3/below");
+    expect(moved).toHaveBeenCalledWith({ marker_id: "today", marker_offset: { x: 12, y: 30 } });
+    expect(view.serialize().markers![0].marker_offset).toEqual({ x: 12, y: 30 });
+
+    const label = container.querySelector<HTMLElement>('.tlv-marker-label[data-marker="today"]')!;
+    expect(label.style.marginTop).toBe("30px");
+    // Draggable like a callout label.
+    expect(label.hasAttribute("data-entry")).toBe(true);
+    expect(() => view.setMarkerOffset("nope", { x: 0, y: 0 })).toThrow(/not found/);
+  });
+
+  it("draws one straight line across every timeline with absolute: true", () => {
+    new TimelineView("tl").parse(data(true));
+    expect(runs("freeze")).toEqual(["1:bar-4:bar"]);
+    expect(labelAt("freeze")).toBe("4/below");
+    // The position is taken on the first timeline: 2026-04-01 is 31 of its 61 days in.
+    const line = container.querySelector<HTMLElement>('.tlv-marker-line[data-marker="freeze"]')!;
+    expect(Number(line.dataset.at)).toBeCloseTo(31 / 61, 6);
   });
 });
 
@@ -467,7 +553,7 @@ describe("moveEntry without a backend", () => {
       patch: { placement: "above", callout_offset: { x: 10, y: -24 } },
     });
     expect(container.querySelector('.tlv-area--above .tlv-callout')).not.toBeNull();
-    expect(view.serialize().timelines[0].entries[1].callout_offset!.y).toBeLessThanOrEqual(0); // above
+    expect((view.serialize().timelines[0].entries[1] as TaskEntryData).callout_offset!.y).toBeLessThanOrEqual(0); // above
   });
 
   it("rejects invalid moves and fires move_failed", async () => {
@@ -510,7 +596,7 @@ describe("moveEntry with a REST backend", () => {
 
     await expect(view.moveEntry(1, 2, { placement: "above" })).rejects.toMatchObject({ status: 422 });
 
-    expect(view.serialize().timelines[0].entries[1].callout_offset!.y).toBeGreaterThan(0); // below
+    expect((view.serialize().timelines[0].entries[1] as TaskEntryData).callout_offset!.y).toBeGreaterThan(0); // below
     expect(failed.mock.calls[0][0].error).toMatchObject({ status: 422 });
   });
 

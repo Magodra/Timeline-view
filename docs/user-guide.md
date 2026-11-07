@@ -49,8 +49,12 @@ An entry can't have both `line` and `callout_offset`. One task can appear on sev
       finish_date: "2026-05-01",
       entries: [
       { task: 1, line: 1 },                                 // bar line 1
-      { task: 2, callout_offset: { x: 30, y: 16 } }      // label below the bar
+      { task: 2, callout_offset: { x: 30, y: 16 } },     // label below the bar
+      { marker: "today" }                                // show marker "today" on this timeline
     ]}
+  ],
+  markers: [                                             // optional, see Markers below
+    { id: "today", text: "Today", date: "2026-03-20" }
   ]
 }
 ```
@@ -126,6 +130,37 @@ The container's size never changes the time scale's dates or the callout offsets
 <!-- Grows up to 600px, then scrolls: -->
 <div id="timeline_here" style="max-height: 600px;"></div>
 ```
+
+### Markers
+
+A **marker** marks a date with a vertical line across the bars, such as "Today" or a deadline. Markers are listed in `markers`:
+
+```js
+markers: [
+  { id: "today", text: "Today", date: "2026-06-20", global: true },
+  { id: "review", text: "Budget review", date: "2026-11-15", color: "#8250df", marker_offset: { x: 10, y: 20 } }
+]
+```
+
+| Field | Meaning |
+|-------|---------|
+| `id`, `text`, `date` | Identity, label text, and the date the line is drawn at. |
+| `global` | `true`: shown on every timeline. `false` (default): only on timelines with a `{ marker: id }` entry. |
+| `color` | Any CSS color. Default: red (`--tlv-marker`). |
+| `marker_offset` | Places the label, like `callout_offset`: `y ≤ 0` above the topmost bar, `y > 0` below the bottommost. Default `{ x: 0, y: -16 }`. |
+
+To show a non-global marker, add `{ marker: id }` to the `entries` of each timeline that should show it. The line starts at the top of the topmost of those timelines' bars and ends at the bottom of the bottommost, crossing any timelines in between. A global marker runs from the top of the first bar to the bottom of the last. The label, with the marker's text and date, is joined to the line's top or bottom end.
+
+Drag a marker's label to move it, as you drag a callout label. Dropped above a bar, it goes above the topmost timeline showing the marker; dropped below a bar, below the bottommost: a marker's label always sits at one end of its line. The area it will land in is highlighted while you drag. The new position is the marker's `marker_offset` in `serialize()`, and fires `marker_moved`:
+
+```js
+timeline.on("marker_moved", (e) => { /* e.marker_id, e.marker_offset */ });
+timeline.setMarkerOffset("today", { x: 10, y: 20 });   // the same from code
+```
+
+Markers have no REST call yet, so with a backend, saving a moved label is up to you (for example in `marker_moved`).
+
+With `absolute: true` the line runs straight down the common time axis. Without it, each timeline has its own axis, so the line is drawn only on the timelines whose range holds the date, and a global marker is drawn on each timeline separately: a line across that timeline's bar and its own label, just as if you had added the marker to that timeline alone. The labels share the marker's `marker_offset`, so dragging one moves them all.
 
 ## Moving entries
 
@@ -231,6 +266,7 @@ timeline.attachEvent("onTimelineSelected", (ids) => {
 ```js
 const off = timeline.on("entry_moved", (e) => { /* e.timeline_id, e.task_id, e.patch */ });
 timeline.on("move_failed", (e) => { /* e.error; the view already shows the restored state */ });
+timeline.on("marker_moved", (e) => { /* e.marker_id, e.marker_offset: a marker label was moved */ });
 off(); // unsubscribe
 ```
 

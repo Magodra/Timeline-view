@@ -1,5 +1,5 @@
 import { formatDate } from "./dates";
-import { firstLine, lineCount, viewRange, type Entry, type Task, type Timeline, type TimelineModel } from "./model";
+import { firstLine, lineCount, viewRange, type Entry, type Marker, type Task, type Timeline, type TimelineModel } from "./model";
 import { fraction, periodSerial, ticks } from "./scale";
 
 /** Bar line height in px. The drag code reads positions from the DOM, so only rendering uses this. */
@@ -34,7 +34,9 @@ function el<K extends keyof HTMLElementTagNameMap>(
 export function render(root: HTMLElement, model: TimelineModel): void {
   root.classList.add("tlv");
   root.classList.toggle("tlv--no-dates", !model.view.showDates);
-  root.replaceChildren(...model.timelines.map((t) => renderTimeline(model, t)));
+  const markers = markerPlan(model);
+  root.replaceChildren(...model.timelines.map((t) => renderTimeline(model, t, markers.get(String(t.id)) ?? [])));
+  root.append(...markerLines(model, markers));
   // The view's name, if it has one, as a heading above the timelines.
   if (model.view.name.trim()) {
     const title = el("div", "tlv-title", model.view.name);
@@ -43,6 +45,8 @@ export function render(root: HTMLElement, model: TimelineModel): void {
     root.prepend(title);
   }
   layoutConnectors(root);
+  layoutMarkerLines(root);
+  watchLayout(root);
 }
 
 /**
@@ -93,7 +97,212 @@ function continuation(node: HTMLElement, base: string, before: boolean, after: b
   node.classList.toggle(`${base}--after`, after);
 }
 
-function renderTimeline(model: TimelineModel, timeline: Timeline): HTMLElement {
+/** What one timeline draws of one marker. */
+interface MarkerPart {
+  marker: Marker;
+  /** The marker's date as a fraction of this timeline's bar (outside 0..1 is fine with `absolute`). */
+  at: number;
+  /** The line continues up through the area above the bar, to the timeline above. */
+  up: boolean;
+  /** The line continues down through the area below the bar, to the timeline below. */
+  down: boolean;
+  /** The label goes in this timeline's area above or below the bar. */
+  label?: "above" | "below";
+}
+
+/**
+ * Where each marker is drawn, per timeline. The line runs from the topmost
+ * bar showing the marker (every timeline for a global one) to the bottommost,
+ * crossing the timelines in between. Without `absolute` each timeline has its
+ * own time axis, so timelines whose range doesn't hold the date are skipped,
+ * and a global marker is drawn on each timeline separately.
+ * The label sits above the topmost bar, or below the bottommost if
+ * `marker_offset.y > 0`.
+ */
+function markerPlan(model: TimelineModel): Map<string, MarkerPart[]> {
+  const plan = new Map<string, MarkerPart[]>();
+  const timelines = model.timelines;
+  const range = viewRange(model);
+  for (const marker of model.markers) {
+    if (model.view.absolute && range && clamp01(fraction(marker.date, range.start, range.finish)) !== fraction(marker.date, range.start, range.finish)) {
+      continue; // outside the whole view
+    }
+    const shown = timelines
+      .map((t, i) => (marker.global || t.markers.some((id) => String(id) === String(marker.id)) ? i : -1))
+      .filter((i) => i >= 0);
+    if (shown.length === 0) continue;
+    const below = marker.offset.y > 0;
+
+    // A global marker without `absolute`: the timelines have their own time
+    // axes, so a line joining them would mean nothing. Each timeline whose
+    // range holds the date gets the marker on its own, as if it had been
+    // added to that timeline alone: a line across its bar and its own label.
+    if (marker.global && !model.view.absolute) {
+      for (const t of timelines) {
+        const at = fraction(marker.date, t.start, t.finish);
+        if (at < 0 || at > 1) continue;
+        const parts = plan.get(String(t.id)) ?? [];
+        parts.push({ marker, at, up: false, down: false, label: below ? "below" : "above" });
+        plan.set(String(t.id), parts);
+      }
+      continue;
+    }
+
+    const rows: Array<{ index: number; at: number }> = [];
+    for (let i = Math.min(...shown); i <= Math.max(...shown); i++) {
+      const at = fraction(marker.date, timelines[i].start, timelines[i].finish);
+      if (model.view.absolute || (at >= 0 && at <= 1)) rows.push({ index: i, at });
+    }
+    if (rows.length === 0) continue;
+
+    const top = rows[0].index;
+    const bottom = rows[rows.length - 1].index;
+    for (const { index, at } of rows) {
+      const parts = plan.get(String(timelines[index].id)) ?? [];
+      parts.push({
+        marker,
+        at,
+        up: index !== top,
+        down: index !== bottom,
+        label: !below && index === top ? "above" : below && index === bottom ? "below" : undefined,
+      });
+      plan.set(String(timelines[index].id), parts);
+    }
+  }
+  return plan;
+}
+
+/** A marker's color: sets the theme variable its line, label and connector are drawn with. */
+function markerColor(node: HTMLElement, marker: Marker): HTMLElement {
+  if (marker.color) node.style.setProperty("--tlv-marker", marker.color);
+  return node;
+}
+
+/**
+ * A marker's line as single elements, one per straight run down the
+ * timelines, so its width can't vary along the way. With `absolute` the whole
+ * line is one run. Without it, a run breaks where the next timeline's own axis
+ * puts the date somewhere else. Each element sits in the view's root;
+ * `layoutMarkerLines` measures the bars to place it.
+ */
+function markerLines(model: TimelineModel, plan: Map<string, MarkerPart[]>): HTMLElement[] {
+  const lines: HTMLElement[] = [];
+  for (const marker of model.markers) {
+    const rows = model.timelines.flatMap((t) => {
+      const part = plan.get(String(t.id))?.find((p) => p.marker === marker);
+      return part ? [{ timeline: t, part }] : [];
+    });
+    let run: typeof rows = [];
+    const flush = () => {
+      if (run.length === 0) return;
+      const first = run[0];
+      const last = run[run.length - 1];
+      const line = markerColor(el("span", "tlv-marker-line"), marker);
+      Object.assign(line.dataset, {
+        marker: String(marker.id),
+        from: String(first.timeline.id),
+        to: String(last.timeline.id),
+        at: String(first.part.at),
+        // Starts at the bar's top unless it comes from a timeline above; ends at the bar's bottom unless it goes on.
+        top: first.part.up ? "row" : "bar",
+        bottom: last.part.down ? "row" : "bar",
+      });
+      lines.push(line);
+      run = [];
+    };
+    for (const row of rows) {
+      const prev = run[run.length - 1];
+      const joins =
+        prev !== undefined &&
+        prev.part.down &&
+        row.part.up &&
+        model.timelines.indexOf(row.timeline) === model.timelines.indexOf(prev.timeline) + 1 &&
+        (model.view.absolute || Math.abs(prev.part.at - row.part.at) < 1e-9);
+      if (!joins) flush();
+      run.push(row);
+    }
+    flush();
+  }
+  return lines;
+}
+
+/**
+ * Places each marker line: horizontally at its date on the first timeline's
+ * span, vertically from that timeline's bar top (or row top) to the last
+ * one's bar bottom (or row bottom). Being one element, it is drawn with
+ * the same width everywhere.
+ *
+ * Positions are measured in the viewport and converted using where a line
+ * placed at 0,0 actually lands, so borders and scrolling of the view (and
+ * how the browser treats them) don't matter.
+ */
+export function layoutMarkerLines(root: HTMLElement): void {
+  const lines = [...root.querySelectorAll<HTMLElement>(":scope > .tlv-marker-line")];
+  if (lines.length === 0) return;
+  const rows = [...root.querySelectorAll<HTMLElement>(".tlv-timeline")];
+  const row = (id: string | undefined) => rows.find((n) => n.dataset.timeline === id);
+
+  lines[0].style.left = "0px";
+  lines[0].style.top = "0px";
+  const origin = lines[0].getBoundingClientRect();
+
+  for (const line of lines) {
+    const first = row(line.dataset.from);
+    const last = row(line.dataset.to);
+    const span = first?.querySelector(".tlv-span")?.getBoundingClientRect();
+    const topBar = first?.querySelector(".tlv-bar")?.getBoundingClientRect();
+    const bottomBar = last?.querySelector(".tlv-bar")?.getBoundingClientRect();
+    if (!first || !last || !span || !topBar || !bottomBar) continue;
+    const x = span.left + Number(line.dataset.at) * span.width;
+    const top = line.dataset.top === "bar" ? topBar.top : first.getBoundingClientRect().top;
+    const bottom = line.dataset.bottom === "bar" ? bottomBar.bottom : last.getBoundingClientRect().bottom;
+    line.style.left = `${x - 1 - origin.left}px`; // centered on the date
+    line.style.top = `${top - origin.top}px`;
+    line.style.height = `${Math.max(0, bottom - top)}px`;
+  }
+}
+
+/** Keeps marker lines placed when the view or its timelines change size (resize, fonts loading). */
+const observers = new WeakMap<HTMLElement, ResizeObserver>();
+function watchLayout(root: HTMLElement): void {
+  if (typeof ResizeObserver === "undefined") return;
+  let observer = observers.get(root);
+  if (!observer) {
+    observer = new ResizeObserver(() => layoutMarkerLines(root));
+    observers.set(root, observer);
+  }
+  observer.disconnect();
+  if (!root.querySelector(":scope > .tlv-marker-line")) return;
+  observer.observe(root);
+  for (const row of root.querySelectorAll(".tlv-timeline")) observer.observe(row);
+}
+
+/** Stops watching the view's layout (when the view is destroyed). */
+export function unwatchLayout(root: HTMLElement): void {
+  observers.get(root)?.disconnect();
+  observers.delete(root);
+}
+
+/** A marker's label, placed like a callout, with a connector from the line's end on the bar's edge. */
+function markerLabel(part: MarkerPart, placement: "above" | "below"): HTMLElement[] {
+  const { marker, at } = part;
+  const { x, y } = marker.offset;
+  const connector = markerColor(el("div", "tlv-connector tlv-connector--marker"), marker);
+  connector.style.left = pct(at);
+  connector.style[placement === "above" ? "bottom" : "top"] = "0";
+
+  const box = markerColor(el("div", "tlv-marker-label"), marker);
+  // Draggable like a callout (data-entry); drag.ts tells it apart by data-marker.
+  Object.assign(box.dataset, { entry: "", marker: String(marker.id), at: String(at), x: String(x), y: String(y), reach: "0" });
+  box.style.marginLeft = `calc(${pct(at)} + ${x}px)`;
+  if (placement === "above") box.style.marginBottom = `${-y}px`;
+  else box.style.marginTop = `${y}px`;
+  box.title = `${marker.text} (${formatDate(marker.date)})`;
+  box.append(el("div", "tlv-callout-title", marker.text), el("div", "tlv-callout-dates", formatDate(marker.date)));
+  return [connector, box];
+}
+
+function renderTimeline(model: TimelineModel, timeline: Timeline, markers: MarkerPart[]): HTMLElement {
   const row = el("section", `tlv-timeline tlv-timeline--name-${model.view.namePosition}`);
   row.dataset.timeline = String(timeline.id);
   row.setAttribute("aria-label", timeline.name);
@@ -108,11 +317,13 @@ function renderTimeline(model: TimelineModel, timeline: Timeline): HTMLElement {
     spanNode.style.marginLeft = pct(from);
     spanNode.style.width = pct(to - from);
   }
-  spanNode.append(
-    renderCalloutArea(model, timeline, "above"),
-    renderBar(model, timeline),
-    renderCalloutArea(model, timeline, "below"),
-  );
+  const above = renderCalloutArea(model, timeline, "above");
+  const bar = renderBar(model, timeline);
+  const below = renderCalloutArea(model, timeline, "below");
+  spanNode.append(above, bar, below);
+  for (const part of markers) {
+    if (part.label) (part.label === "above" ? above : below).append(...markerLabel(part, part.label));
+  }
   const center = el("div", "tlv-center");
   center.append(spanNode);
   row.append(el("div", "tlv-name", timeline.name), center);
@@ -284,7 +495,7 @@ function renderCalloutArea(model: TimelineModel, timeline: Timeline, placement: 
  * it survives resizes.
  */
 function layoutConnectors(root: HTMLElement): void {
-  for (const box of root.querySelectorAll<HTMLElement>(".tlv-callout")) {
+  for (const box of root.querySelectorAll<HTMLElement>(".tlv-callout, .tlv-marker-label")) {
     const connector = box.previousElementSibling as HTMLElement;
     const x = Number(box.dataset.x);
     const y = Number(box.dataset.y);

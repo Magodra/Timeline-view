@@ -10,10 +10,11 @@
 </head>
 <body>
     <h1>Basic timeline</h1>
-    <p>Drag the task bar between lines, or drag the milestone label anywhere above or below the bar. The label areas grow to fit. Click a task or label to see the click event.</p>
+    <p>Drag the task bar between lines, or drag the milestone label anywhere above or below the bar. The label areas grow to fit. Click a task or label to see the click event and select it; Ctrl+Click selects several. Untick "Selection" to turn selection off.</p>
     <p class="controls">
         <label><input type="checkbox" id="show_dates" checked> Show start and finish dates</label>
-        <label><input type="checkbox" id="click_events" checked> Report clicks</label>
+        <label><input type="checkbox" id="selection" checked> Selection</label>
+        <label><input type="checkbox" id="click_events" checked> Report clicks:</label>
         <span id="clicked">Nothing clicked yet.</span>
     </p>
     <div id="timeline_here" style="width: 1000px; max-width: 100%;"></div>
@@ -23,6 +24,12 @@
         document.getElementById("show_dates").addEventListener("change", (e) => {
             const data = timeline.serialize();
             data.view.show_dates = e.target.checked;
+            timeline.parse(data);
+        });
+        // Turns selection on or off (view.selection). Turning it off also clears the current selection.
+        document.getElementById("selection").addEventListener("change", (e) => {
+            const data = timeline.serialize();
+            data.view.selection = e.target.checked;
             timeline.parse(data);
         });
         timeline.parse({

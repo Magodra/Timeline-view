@@ -1,9 +1,9 @@
 import { ApiError, RestClient } from "./api";
-import { attachDrag, type DropEvent } from "./drag";
+import { attachDrag, type DropEvent, type MarkerDropEvent } from "./drag";
 import { patchFromData, TimelineModel } from "./model";
-import { render } from "./render";
+import { render, unwatchLayout } from "./render";
 import { toSVG } from "./svg";
-import type { Id, MovePatchData, TimelineViewData } from "./types";
+import type { Id, MovePatchData, Offset, TimelineViewData } from "./types";
 
 export interface TimelineOptions {
   /** Base URL of the REST backend. Without it, changes are only reported through events. */
@@ -22,11 +22,21 @@ export interface MoveFailedEvent extends EntryMovedEvent {
   error: unknown;
 }
 
+export interface MarkerMovedEvent {
+  marker_id: Id;
+  marker_offset: Offset;
+}
+
 export interface TimelineEvents {
   /** A move was applied on screen. Fired before the REST request, if any, is sent. */
   entry_moved: EntryMovedEvent;
   /** A move was rejected, locally or by the server. The view shows the restored state. */
   move_failed: MoveFailedEvent;
+  /**
+   * A marker's label was moved (dragged, or `setMarkerOffset`). Markers have
+   * no REST call yet, so saving the new `marker_offset` is up to the host.
+   */
+  marker_moved: MarkerMovedEvent;
 }
 
 type Handler<T> = (event: T) => void;
@@ -106,6 +116,7 @@ export class TimelineView {
       (e) => this.onDrop(e),
       (entry, e) => this.onEntryClick(entry, e),
       (target, e) => this.onBackgroundClick(target, e),
+      (e) => this.onMarkerDrop(e),
     );
   }
 
@@ -215,6 +226,16 @@ export class TimelineView {
     this.setSelection(this.selected.kind, []);
   }
 
+  /**
+   * Moves a marker's label, as dragging it does: `y ≤ 0` above the topmost
+   * bar showing the marker, `y > 0` below the bottommost. Fires `marker_moved`.
+   */
+  setMarkerOffset(markerId: Id, offset: Offset): void {
+    const marker = this.requireModel().setMarkerOffset(markerId, offset);
+    this.render();
+    this.emit("marker_moved", { marker_id: marker.id, marker_offset: { ...marker.offset } });
+  }
+
   /** Moves a timeline one place up the stack. Returns false if it is already at the top. */
   moveTimelineUp(id: Id): boolean {
     return this.moveTimeline(id, -1);
@@ -298,6 +319,7 @@ export class TimelineView {
   /** Removes the view's DOM and event listeners. */
   destroy(): void {
     this.detachDrag();
+    unwatchLayout(this.container);
     this.listeners.clear();
     this.handlers.clear();
     this.container.replaceChildren();
@@ -346,6 +368,12 @@ export class TimelineView {
     for (const { name: n, handler } of [...this.handlers.values()]) {
       if (n === name) (handler as (this: TimelineView, ...a: Parameters<TimelineHandlers[K]>) => void).apply(this, args);
     }
+  }
+
+  private onMarkerDrop({ marker, offset }: MarkerDropEvent): void {
+    const found = this.model?.markers.find((m) => String(m.id) === marker);
+    if (!found || (found.offset.x === offset.x && found.offset.y === offset.y)) return;
+    this.setMarkerOffset(found.id, offset);
   }
 
   private onEntryClick(entry: HTMLElement, e: MouseEvent): void {

@@ -1,5 +1,5 @@
 import "./styles.css";
-import type { Id, MovePatchData, TimelineViewData } from "./types";
+import type { Id, MovePatchData, Offset, TimelineViewData } from "./types";
 import {
   TimelineView,
   type TimelineEventName,
@@ -17,6 +17,7 @@ export {
   MoveCancelledError,
   TimelineView,
   type EntryMovedEvent,
+  type MarkerMovedEvent,
   type MoveFailedEvent,
   type TimelineEvents,
   type TimelineEventName,
@@ -57,6 +58,7 @@ export const unselectTimeline = (id: Id) => instance().unselectTimeline(id);
 export const clearSelection = () => instance().clearSelection();
 export const getSelectedTasks = () => instance().getSelectedTasks();
 export const getSelectedTimelines = () => instance().getSelectedTimelines();
+export const setMarkerOffset = (markerId: Id, offset: Offset) => instance().setMarkerOffset(markerId, offset);
 export const moveTimelineUp = (id: Id) => instance().moveTimelineUp(id);
 export const moveTimelineDown = (id: Id) => instance().moveTimelineDown(id);
 export const moveTimeline = (id: Id, delta: number) => instance().moveTimeline(id, delta);

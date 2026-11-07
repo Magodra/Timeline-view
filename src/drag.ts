@@ -13,6 +13,12 @@ export interface DropEvent {
   offset?: Offset;
 }
 
+/** A marker label dropped somewhere: its new `marker_offset`. The id is the DOM's string form. */
+export interface MarkerDropEvent {
+  marker: string;
+  offset: Offset;
+}
+
 /** Pointer travel, in px, before a press turns into a drag. */
 const DRAG_THRESHOLD = 4;
 
@@ -61,6 +67,40 @@ function targetElementAt(root: HTMLElement, x: number, y: number): HTMLElement |
   return nearest;
 }
 
+/** Above or below the bar, for a drop target: a callout area's side, or for a bar line the nearer edge. */
+function sideAt(node: HTMLElement | null, y: number): "above" | "below" | undefined {
+  if (!node) return undefined;
+  const placement = node.dataset.placement;
+  if (placement === "above" || placement === "below") return placement;
+  const bar = node.closest(".tlv-bar")?.getBoundingClientRect();
+  return bar && y > (bar.top + bar.bottom) / 2 ? "below" : "above";
+}
+
+/**
+ * Where a marker's label goes on `side`: the area above the topmost bar
+ * showing the marker, or below the bottommost, and the line's position there.
+ */
+function markerHome(root: HTMLElement, marker: string, side: "above" | "below", near: HTMLElement | null) {
+  const lines = [...root.querySelectorAll<HTMLElement>(":scope > .tlv-marker-line")].filter(
+    (n) => n.dataset.marker === marker,
+  );
+  const rows = [...root.querySelectorAll<HTMLElement>(".tlv-timeline")];
+  const index = (id: string | undefined) => rows.findIndex((n) => n.dataset.timeline === id);
+  // A marker drawn on each timeline separately (global, without `absolute`) has
+  // a line and label per timeline: use the one where the label is dropped.
+  const at = near ? rows.indexOf(near) : -1;
+  const own = lines.find((l) => index(l.dataset.from) <= at && at <= index(l.dataset.to));
+  const line = own ?? (side === "above" ? lines[0] : lines[lines.length - 1]);
+  const id = side === "above" ? line?.dataset.from : line?.dataset.to;
+  const row = rows.find((n) => n.dataset.timeline === id);
+  const area = row?.querySelector<HTMLElement>(`.tlv-area--${side}`);
+  if (!line || !area) return undefined;
+  // Where the line crosses the area, as a fraction of its width.
+  const a = area.getBoundingClientRect();
+  const l = line.getBoundingClientRect();
+  return { area, side, at: (l.left + l.width / 2 - a.left) / a.width };
+}
+
 function targetOf(node: HTMLElement): DropTarget {
   const timeline = node.dataset.timeline!;
   const placement = node.dataset.placement as Placement;
@@ -81,6 +121,7 @@ export function attachDrag(
   onDrop: (event: DropEvent) => void,
   onClick?: (entry: HTMLElement, event: PointerEvent) => void,
   onBackgroundClick?: (target: HTMLElement, event: PointerEvent) => void,
+  onMarkerDrop?: (event: MarkerDropEvent) => void,
 ): () => void {
   let cleanup: (() => void) | undefined;
 
@@ -120,6 +161,14 @@ export function attachDrag(
     const rect = source.getBoundingClientRect();
     const grab = { x: down.clientX - rect.left, y: down.clientY - rect.top };
     const isCalloutSource = source.classList.contains("tlv-callout");
+    // A marker's label can only sit at one end of its line: above the topmost
+    // bar or below the bottommost. Its drop target is that area.
+    const marker = source.dataset.marker;
+    const markerTarget = (x: number, y: number) => {
+      const node = targetElementAt(root, x, y);
+      const side = sideAt(node, y);
+      return side ? markerHome(root, marker!, side, node?.closest<HTMLElement>(".tlv-timeline") ?? null) : undefined;
+    };
     let ghost: HTMLElement | undefined;
     let hover: HTMLElement | null = null;
 
@@ -143,7 +192,11 @@ export function attachDrag(
       }
       ghost.style.left = `${move.clientX - grab.x}px`;
       ghost.style.top = `${move.clientY - grab.y}px`;
-      setHover(targetElementAt(root, move.clientX, move.clientY));
+      setHover(
+        marker !== undefined
+          ? (markerTarget(move.clientX, move.clientY)?.area ?? null)
+          : targetElementAt(root, move.clientX, move.clientY),
+      );
     };
 
     const finish = (up?: PointerEvent) => {
@@ -157,6 +210,15 @@ export function attachDrag(
         return;
       }
       if (!node || !box || !up) return;
+
+      if (marker !== undefined) {
+        const home = markerTarget(up.clientX, up.clientY);
+        if (home) {
+          const offset = calloutOffset(box, home.area.getBoundingClientRect(), home.at, home.side);
+          onMarkerDrop?.({ marker, offset });
+        }
+        return;
+      }
 
       const target = targetOf(node);
       const event: DropEvent = { timeline: source.dataset.timeline!, task: source.dataset.task!, target };

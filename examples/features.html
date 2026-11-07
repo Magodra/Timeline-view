@@ -14,7 +14,8 @@
         Several timelines, a month scale, month and year durations, milestone symbols,
         names on the right, and callout labels at different heights above and below the bar.
         "Support" runs past the timeline's finish, so its bar ends in an arrow. "Support",
-        "Launch" and "Security audit" have their own <code>color</code>.
+        "Launch" and "Security audit" have their own <code>color</code>. The red "Today" line is a global marker: without <code>absolute</code> each timeline has its
+        own time axis, so it is drawn on each timeline separately.
         Click a task or a timeline to select it, Ctrl+Click (Cmd+Click on a Mac) to select several,
         and click a selected item again to deselect. The buttons below are outside the component
         and move the selected timelines with <code>moveTimelineUp</code> / <code>moveTimelineDown</code>.
@@ -31,7 +32,9 @@
         A second view with <code>absolute: true</code>. Each timeline has its own start and finish
         dates, and all of them share one time axis, so each bar sits at its place in time and the
         same date lines up from timeline to timeline. Tasks that start before or finish after their
-        timeline's range end in an arrow on the bar, or a pointed marker for a callout.
+        timeline's range end in an arrow on the bar, or a pointed marker for a callout. "Today" is a
+        global marker in blue; "Budget review" is a marker on Delivery and Operations only, labelled below.
+        Drag a marker's label to move it, or to the other end of its line.
     </p>
     <div id="absolute_here"></div>
     <script>
@@ -51,18 +54,23 @@
                 { id: "kickoff", text: "Kick-off", start_date: "2026-01-12", symbol: "square" }
             ],
             timelines: [
-                { id: "dev", name: "Development", start_date: "2026-01-01", finish_date: "2027-07-01", entries: [
+                { id: "dev", name: "Development", start_date: "2026-01-01", finish_date: "2027-04-01", entries: [
                     { task: "design", line: 0 },
                     { task: "build", line: 1 },
                     { task: "kickoff", callout_offset: { x: 0, y: -16 } },
                     { task: "review", callout_offset: { x: -40, y: -64 } },
                     { task: "beta", callout_offset: { x: 12, y: 16 } }
                 ]},
-                { id: "ops", name: "Operations", start_date: "2026-01-01", finish_date: "2027-07-01", entries: [
+                { id: "ops", name: "Operations", start_date: "2026-05-01", finish_date: "2027-07-01", entries: [
                     { task: "launch", line: 0 },
                     { task: "support", line: 1 },
                     { task: "audit", callout_offset: { x: -60, y: 40 } }
                 ]}
+            ],
+            // A global marker. These timelines have their own time axes (no `absolute`),
+            // so it is drawn on each timeline separately, with its own label.
+            markers: [
+                { id: "today", text: "Today", date: "2026-06-20", global: true }
             ]
         });
 
@@ -124,13 +132,21 @@
                 ]},
                 { id: "delivery", name: "Delivery", start_date: "2026-03-01", finish_date: "2026-12-01", entries: [
                     { task: "build", line: 0 },
-                    { task: "rollout", line: 1 }
+                    { task: "rollout", line: 1 },
+                    { marker: "review" }
                 ]},
                 { id: "operations", name: "Operations", start_date: "2026-09-01", finish_date: "2027-03-01", entries: [
                     { task: "launch", line: 0 },
                     { task: "support", line: 1 },
-                    { task: "migration", callout_offset: { x: 10, y: -16 } }
+                    { task: "migration", callout_offset: { x: 10, y: -16 } },
+                    { marker: "review" }
                 ]}
+            ],
+            // "Budget review" is shown on Delivery and Operations only; its label goes
+            // below the bottom one (y > 0). "Today" is global and blue.
+            markers: [
+                { id: "today", text: "Today", date: "2026-06-20", global: true, color: "blue" },
+                { id: "review", text: "Budget review", date: "2026-11-15", color: "#8250df", marker_offset: { x: 10, y: 20 } }
             ]
         });
     </script>

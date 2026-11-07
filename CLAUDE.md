@@ -80,6 +80,7 @@ The hierarchy, from outermost to innermost:
 | **Area**     | One of the three parts of a timeline: callouts `above`, the bar itself (`on`), and callouts `below`. |
 | **Line**     | A sub-row of the bar (`on`) area. Callout areas have no lines. |
 | **Entry**    | The placement of a task on a timeline: `task`, plus either `line` (on the bar, default 0) or `callout_offset` (a callout). The area is derived, not stored: no `callout_offset` means on the bar; `callout_offset.y > 0` means below; `y ≤ 0` means above. Internally the model keeps a `placement` (`above` \| `on` \| `below`). A task appears at most once per timeline, so the pair (timeline `id`, `task`) identifies an entry. |
+| **Marker**   | A dated vertical line across one or more timelines (for example "Today"), with a label. `global` markers show on every timeline; others on the timelines that have a `{ marker: id }` entry. |
 | **Task**     | The single item entity, identified by `id`. A task can appear on several timelines through entries. Its `finish_date` is `start_date + duration`: derived, never stored. |
 
 ### Task kinds
@@ -115,6 +116,7 @@ Duration format: a whole number plus a unit: `h` (hours), `d` (days), `w` (weeks
   - `x`: to the label's left edge.
   - `y`: to the label's edge nearest the bar, and it picks the side: `y > 0` below the bar, `y ≤ 0` above it, so a label never overlaps the bar. A label flush below the bar has `y = 1`, since `y = 0` means above.
   - An entry without `callout_offset` is on the bar, not a callout. A callout created by a move without an offset (for example a bar dragged by `moveEntry` with only `placement`) sits 16 px from the bar (`{ x: 0, y: ∓16 }`).
+- **Markers:** a marker is a vertical line at its `date`, in its `color` or the theme's `--tlv-marker` (red). It runs from the top of the topmost bar that shows it to the bottom of the bottommost, crossing the timelines in between; a `global` marker spans every timeline. Its label (text and date) is placed like a callout by `marker_offset`, with a solid connector to the line's end: `y ≤ 0` above the topmost bar (default `{ x: 0, y: -16 }`), `y > 0` below the bottommost. With `view.absolute` the line is straight down the common time axis; without it each timeline has its own axis, so timelines whose range doesn't hold the date are skipped, and a `global` marker is drawn on each timeline separately (its own line across that bar and its own label, as if added to that timeline alone; all share the one `marker_offset`). The line is one element per straight run, in the view's root, placed by measuring the bars after rendering and again on resize (`markerPlan`, `markerLines`, `layoutMarkerLines` in `render.ts`); with `absolute` that is one element for the whole line, so its width can't vary between timelines. Don't split it into per-timeline pieces: at display scales such as 125% they round to device pixels differently and the line changes thickness. The label can be dragged like a callout label: dropped above a bar it goes above the topmost timeline showing the marker, below a bar below the bottommost; the drop sets `marker_offset` and fires `marker_moved`. Markers have no REST call (**TBD**), so the host saves moved labels.
 - **Area size:** each callout area's height fits all of its labels, plus padding on the outer side to drop into. It is a one-cell CSS grid where labels are placed with margins, so the browser sizes it (see `render.ts`).
 - **Drag and drop:**
   - Task bars and milestones can be dragged between bar lines and timelines. A drop on a bar line goes to the line under the pointer. The bar has a virtual half line above its first line and below its last; dropping there inserts a new line at the top or bottom.
@@ -154,13 +156,19 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
   timelines: [
     { id: 1, name: "Project", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [
       { task: 1, line: 1 },
-      { task: 2, callout_offset: { x: 30, y: 16 } }
+      { task: 2, callout_offset: { x: 30, y: 16 } },
+      { marker: 1 }                      // shows marker 1 on this timeline
     ]}
+  ],
+  markers: [                             // optional
+    { id: 1, text: "Today", date: "2026-03-20", color: "blue",   // color optional, default red
+      global: false,                     // true: on every timeline, no entries needed
+      marker_offset: { x: 0, y: -16 } }  // label: y ≤ 0 above the top bar, y > 0 below the bottom one
   ]
 }
 ```
 
-`parse()` throws on invalid data: a task `color` that isn't a CSS color; a timeline without `start_date` or `finish_date`, or finishing before it starts; bad dates or durations, duplicate task ids, entries for unknown tasks, a task twice on one timeline, a negative or fractional `line`, an entry with both `line` and `callout_offset`, or a `callout_offset` without numeric `x` and `y`.
+`parse()` throws on invalid data: a marker with a bad date, a duplicate id, an invalid `color` or `marker_offset`; a `{ marker }` entry for an unknown marker, twice on one timeline, or with other fields; a task `color` that isn't a CSS color; a timeline without `start_date` or `finish_date`, or finishing before it starts; bad dates or durations, duplicate task ids, entries for unknown tasks, a task twice on one timeline, a negative or fractional `line`, an entry with both `line` and `callout_offset`, or a `callout_offset` without numeric `x` and `y`.
 
 ## JavaScript API
 
@@ -172,7 +180,8 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
 | `timeline.serialize()` | Returns the current data. |
 | `timeline.toSVG()` | Returns the view as a standalone SVG document (a string), as it looks on screen. The view must be rendered and visible. Saving it is up to the host page; see [examples/export.html](examples/export.html). |
 | `timeline.moveEntry(timeline_id, task_id, patch)` | Moves an entry, as a drop does. Takes the PATCH body below, without `version`. |
-| `timeline.on("entry_moved" \| "move_failed", handler)` | Subscribes to move events. Returns an unsubscribe function. |
+| `timeline.on("entry_moved" \| "move_failed" \| "marker_moved", handler)` | Subscribes to move events. Returns an unsubscribe function. `marker_moved` gets `{ marker_id, marker_offset }`. |
+| `timeline.setMarkerOffset(marker_id, { x, y })` | Moves a marker's label, as dragging it does. Fires `marker_moved`. |
 | `timeline.attachEvent(name, handler)` | Subscribes to a user event; returns an event id. Inside a `function` handler, `this` is the view. Events: `onTaskClick (task_id, event, timeline_id)`: a task bar, milestone or callout clicked without dragging. `onTimelineClick (timeline_id, event)`: a timeline clicked outside its tasks. `onTaskSelected (task_ids)`, `onTimelineSelected (timeline_ids)`: the selection changed; the lists hold every selected id. |
 | `timeline.selectTask(id, add?)`, `selectTimeline(id, add?)` | Selects only this item, or with `add` adds it to the selection (same kind only). Return `false` when `view.selection` is off. |
 | `timeline.unselectTask(id)`, `unselectTimeline(id)`, `clearSelection()` | Deselects one item, or everything. |

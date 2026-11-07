@@ -203,6 +203,35 @@ components:
           properties:
             task: { $ref: "#/components/schemas/Id" }
             callout_offset: { $ref: "#/components/schemas/Offset" }
+        - type: object
+          description: Shows a (non-global) marker on this timeline.
+          required: [marker]
+          additionalProperties: false
+          properties:
+            marker: { $ref: "#/components/schemas/Id" }
+
+    Marker:
+      type: object
+      description: |
+        A vertical line at `date` from the top of the topmost bar that shows
+        the marker to the bottom of the bottommost, with a label.
+      required: [id, text, date]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        text: { type: string }
+        date: { $ref: "#/components/schemas/Date" }
+        global:
+          type: boolean
+          default: false
+          description: "`true`: on every timeline. `false`: on timelines with a `{ marker: id }` entry."
+        color:
+          type: string
+          description: Any CSS color. Default red.
+        marker_offset:
+          allOf: [{ $ref: "#/components/schemas/Offset" }]
+          description: |
+            Label position, like `callout_offset`: `y ≤ 0` above the topmost
+            bar, `y > 0` below the bottommost. Default `{ x: 0, y: -16 }`.
 
     Timeline:
       type: object
@@ -235,6 +264,9 @@ components:
         timelines:
           type: array
           items: { $ref: "#/components/schemas/Timeline" }
+        markers:
+          type: array
+          items: { $ref: "#/components/schemas/Marker" }
 
     MovePatch:
       type: object
