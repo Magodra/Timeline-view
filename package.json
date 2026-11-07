@@ -2,7 +2,7 @@
   "name": "timeline-view",
   "version": "0.1.0",
   "description": "A web-based timeline component for displaying and editing timelines.",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "type": "module",
   "files": [
     "dist"
