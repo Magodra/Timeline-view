@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Timeline view - REST backend</title>
+    <script src="../dist/timelineview.js"></script>
+    <link href="../dist/timelineview.css" rel="stylesheet">
+    <link href="examples.css" rel="stylesheet">
+</head>
+<body>
+    <h1>REST backend</h1>
+    <p>
+        The view loads from <code>GET /views/demo</code> and saves every callout move with
+        <code>PATCH /views/demo/timelines/{timeline_id}/entries/{task_id}</code>.
+        The backend here is a mock running in the page, with 300 ms latency.
+    </p>
+    <p class="controls">
+        <label><input type="checkbox" id="fail"> Make the server reject the next move (500)</label>
+        <button id="bump">Simulate an edit by someone else (next move gets 409)</button>
+    </p>
+    <div id="timeline_here" style="height: 420px;"></div>
+    <h2>Requests</h2>
+    <pre id="log"></pre>
+    <script>
+        // ---- Mock backend. It reuses the library's model, so it applies the same rules. ----
+        const server = timeline.TimelineModel.fromData({
+            version: 1,
+            view: { id: "demo", name: "Demo", start_date: "2026-03-01", finish_date: "2026-06-01", scale: "week" },
+            tasks: [
+                { id: 1, text: "Specification", start_date: "2026-03-09", duration: "3w" },
+                { id: 2, text: "Sign-off", start_date: "2026-04-03" },
+                { id: 3, text: "Implementation", start_date: "2026-04-06", duration: "6w" },
+                { id: 4, text: "Release", start_date: "2026-05-22" }
+            ],
+            timelines: [
+                { id: 1, name: "Team A", entries: [
+                    { task: 1, placement: "on", line: 0 },
+                    { task: 3, placement: "on", line: 1 },
+                    { task: 2, placement: "above", callout_offset: { x: 10, y: -16 } },
+                    { task: 4, placement: "below", callout_offset: { x: -60, y: 16 } }
+                ]},
+                { id: 2, name: "Team B", entries: [] }
+            ]
+        });
+
+        const log = document.getElementById("log");
+        const write = (line) => { log.textContent = line + "\n" + log.textContent; };
+        const reply = (status, body) => {
+            write(`  ← ${status} ${JSON.stringify(body).slice(0, 160)}`);
+            return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+        };
+        const STATUS = { not_found: 404, conflict: 409, invalid: 422 };
+
+        async function mockFetch(url, init) {
+            await new Promise((r) => setTimeout(r, 300));
+            const path = new URL(url).pathname;
+            write(`→ ${init.method} ${path} ${init.body ?? ""}`);
+
+            if (init.method === "GET" && path === "/api/views/demo") return reply(200, server.toData());
+
+            const m = path.match(/^\/api\/views\/demo\/timelines\/([^/]+)\/entries\/([^/]+)$/);
+            if (init.method !== "PATCH" || !m) return reply(404, { error: "not found" });
+
+            const { version, ...patch } = JSON.parse(init.body);
+            if (version !== server.version) return reply(409, server.toData());
+            if (document.getElementById("fail").checked) {
+                document.getElementById("fail").checked = false;
+                return reply(500, { error: "simulated failure" });
+            }
+            try {
+                const changed = server.moveEntry(decodeURIComponent(m[1]), decodeURIComponent(m[2]),
+                    timeline.patchFromData(patch));
+                server.version += 1;
+                return reply(200, { version: server.version, timelines: changed.map(timeline.timelineToData) });
+            } catch (error) {
+                const status = STATUS[error.code] ?? 500;
+                return reply(status, status === 409 ? server.toData() : { error: error.message });
+            }
+        }
+
+        document.getElementById("bump").addEventListener("click", () => {
+            server.version += 1;
+            write(`(server version is now ${server.version})`);
+        });
+
+        // ---- The page itself: point the view at the API. ----
+        timeline.init("timeline_here", { api_url: "https://example.test/api", fetch: mockFetch });
+        timeline.on("move_failed", (e) => write(`move_failed: ${e.error.message}`));
+        timeline.load("demo");
+    </script>
+</body>
+</html>

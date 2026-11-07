@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Timeline view - basic example</title>
+    <script src="../dist/timelineview.js"></script>
+    <link href="../dist/timelineview.css" rel="stylesheet">
+    <link href="examples.css" rel="stylesheet">
+</head>
+<body>
+    <h1>Basic timeline</h1>
+    <p>Drag the task bar between lines, or drag the milestone label anywhere above or below the bar. The label areas grow to fit.</p>
+    <p class="controls"><label><input type="checkbox" id="show_dates" checked> Show start and finish dates</label></p>
+    <div id="timeline_here" style="width: 1000px; max-width: 100%; height: 400px;"></div>
+    <script>
+        timeline.init("timeline_here");
+        // Re-parse the current data with the option changed.
+        document.getElementById("show_dates").addEventListener("change", (e) => {
+            const data = timeline.serialize();
+            data.view.show_dates = e.target.checked;
+            timeline.parse(data);
+        });
+        timeline.parse({
+            view: { name: "Example", start_date: "2026-03-01", finish_date: "2026-05-01", scale: "week" },
+            tasks: [
+                { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d" },
+                { id: 2, text: "Milestone #1", start_date: "2026-04-10" }
+            ],
+            timelines: [
+                { id: 1, name: "Project", entries: [
+                    { task: 1, placement: "on", line: 0 },
+                    { task: 2, placement: "below", callout_offset: { x: 30, y: 16 } }
+                ]}
+            ]
+        });
+        timeline.on("entry_moved", (e) => console.log("entry_moved", e));
+    </script>
+</body>
+</html>

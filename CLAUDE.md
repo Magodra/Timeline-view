@@ -1,0 +1,207 @@
+# CLAUDE.md - Timeline view
+
+## Purpose
+
+A web-based timeline component that other applications embed to display and edit timelines.
+
+**Status:** early version. Rendering, drag and drop of entries, and the REST move API work. See [Not built yet](#not-built-yet). Items marked **TBD** are open decisions; ask before settling one.
+
+## Commands
+
+| Task               | Command              | Runs |
+|--------------------|----------------------|------|
+| Install            | `npm install`        | |
+| Dev server         | `npm run dev`        | `vite`, opens `/examples/index.html` |
+| Build              | `npm run build`      | `vite build` (library mode), then `tsc` for type declarations |
+| Test               | `npm test`           | `vitest run` |
+| Test (watch)       | `npm run test:watch` | `vitest` |
+| Type-check         | `npm run lint`       | `tsc --noEmit` (a linter is **TBD**) |
+
+Run `npm run lint` and `npm test` before calling a change done.
+
+## Architecture
+
+- **Language:** TypeScript (strict mode). No runtime dependencies.
+- **Core:** framework-free library, usable from a plain `<script>` tag through a global `timeline` object and as an ES module. A React wrapper may come later (**TBD**).
+- **Build output:** `dist/timelineview.js` (UMD, global `timeline`), `dist/timelineview.mjs` (ESM), `dist/timelineview.css`, `dist/types/`. Built with Vite in library mode.
+- **Drag and drop:** native pointer events (`src/drag.ts`), so the core needs no framework.
+- **Rendering:** plain DOM. The whole view re-renders after every change; there is no diffing.
+- **Tests:** Vitest with `jsdom`. Test files sit next to the source as `*.test.ts`.
+- **Browser support:** current evergreen browsers (Chrome, Edge, Firefox, Safari). The CSS uses container queries.
+- **Backend / REST:** the component does not persist data itself. The host app either passes data with `parse()` and listens for `entry_moved`, or sets `api_url` so the component calls the [REST API](#rest-api).
+- **Examples in the dev server:** the examples load `../dist/timelineview.js` with a classic `<script>` tag, as a host page would. A plugin in [vite.config.ts](vite.config.ts) rewrites those tags to load [src/global.ts](src/global.ts) instead, and turns inline scripts into modules. Keep example pages in that shape: one bundle `<script>`, one stylesheet `<link>`, then plain inline `<script>` blocks.
+
+## Folder structure
+
+```
+/src
+  index.ts      Public entry: exports, plus the default instance (init, parse, load, ...)
+  global.ts     Dev-server entry that sets window.timeline
+  types.ts      Public data format (snake_case)
+  model.ts      Internal model (camelCase), validation and move rules
+  view.ts       TimelineView: ties model, rendering, drag and REST together; events
+  render.ts     DOM rendering
+  drag.ts       Pointer-event drag and drop
+  scale.ts      Time scale ticks
+  dates.ts      UTC date parsing, formatting and arithmetic
+  duration.ts   Duration parsing
+  api.ts        REST client
+  styles.css    Component styles; themable through --tlv-* custom properties
+/examples       Runnable HTML pages, listed in examples/index.html
+/docs           Getting started, user guide, developer guide, api/openapi.yaml
+/dist           Build output (git-ignored)
+```
+
+## Conventions
+
+- Every user-visible feature ships with an update to `/docs` and, where useful, an example in `/examples` (add it to `examples/index.html`).
+- Public data format (what `parse()` takes and the REST API exchanges) uses `snake_case`. Internal TypeScript uses `camelCase`. Convert at the boundary in `model.ts`.
+- Dates in the data format are ISO 8601 (`YYYY-MM-DD`, or `YYYY-MM-DDTHH:mm` when hours matter). Internally all dates are UTC.
+- Line indexes are 0-based everywhere.
+- The move rules live in `TimelineModel.moveEntry` only. The UI, the REST client and the mock server in `examples/rest.html` all go through it. Change the rules there, and keep CLAUDE.md, `docs/api/openapi.yaml` and the tests in step.
+- Keep runtime dependencies at zero; ask before adding one.
+
+## Glossary and domain model
+
+The hierarchy, from outermost to innermost:
+
+**View → Timeline → Area → Line → Entry → Task**
+
+| Term         | Meaning |
+|--------------|---------|
+| **View**     | The whole component. Holds the overall time span and scale, and stacks timelines vertically. |
+| **Timeline** | One horizontal band (a row or swimlane) in the view, with a name. |
+| **Area**     | One of the three parts of a timeline: callouts `above`, the bar itself (`on`), and callouts `below`. |
+| **Line**     | A sub-row of the bar (`on`) area. Callout areas have no lines. |
+| **Entry**    | The placement of a task on a timeline: `task`, `placement` (`above` \| `on` \| `below`), and either `line` (bar) or `callout_offset` (callouts). A task appears at most once per timeline, so the pair (timeline `id`, `task`) identifies an entry. |
+| **Task**     | The single item entity, identified by `id`. A task can appear on several timelines through entries. Its `finish_date` is `start_date + duration`: derived, never stored. |
+
+### Task kinds
+
+Task kind is derived from the data, not stored:
+
+| Kind          | Rule |
+|---------------|------|
+| **Milestone** | `duration` missing or zero, so `finish_date` = `start_date`. |
+| **Task**      | Non-zero `duration`. |
+
+Duration format: a whole number plus a unit: `h` (hours), `d` (days), `w` (weeks), `m` (months), `y` (years). For example `"2d"` or `"3m"`. There is no minutes unit, so `m` always means months. Months and years are calendar units: `"1m"` from 2026-01-31 ends on 2026-02-28.
+
+## User interface
+
+- The view shows its timelines stacked vertically, each in its own rectangular area.
+- **Name label:** each timeline's name is written vertically at its left or right edge (`view.name_position`).
+- **Bar:** the bar spans the full width of the timeline's center area. It has two parts:
+  - **Time scale:** `hour`, `day`, `week` (ISO weeks, starting Monday), `month` or `year` ticks (`view.scale`). The periods between ticks alternate between a light and a darker background.
+  - **Task lines:** tasks are drawn as bars covering their time span. A bar too narrow for its label shows the label beside it. Milestones are drawn as a symbol: `diamond` (default), `circle`, `square`, `triangle` or `star`, set by `view.milestone_symbol` or per task with `symbol`. No divider lines are drawn between task lines.
+- **Start and finish dates:** the view's `start_date` is shown left of the bar under a right-aligned "Start" caption, and its `finish_date` right of the bar under a left-aligned "Finish" caption. `view.show_dates: false` hides both, and the bar then uses the full width.
+- **Callouts:** entries placed `above` or `below` show the task's name, `start_date` and `finish_date`, centered, in a label. On the bar's edge (top when above, bottom when below) each callout has a marker:
+  - a milestone: its symbol (default diamond), centered on the edge at its date;
+  - a task: a short bar over its time span, sitting on the edge, with rounded outer corners.
+
+  A dashed connector runs from the middle of the marker's outer edge to the nearest point of the label. The attachment point is the bar's edge at the middle of the task's span (a milestone's date). The label is placed only by `callout_offset`, in px from the attachment point:
+  - `x`: to the label's left edge.
+  - `y`: to the label's edge nearest the bar. `y ≤ 0` above the bar, `y ≥ 0` below it, so a label never overlaps the bar.
+  - Without an offset, a label sits 16 px from the bar (`{ x: 0, y: ∓16 }`).
+- **Area size:** each callout area's height fits all of its labels, plus padding on the outer side to drop into. It is a one-cell CSS grid where labels are placed with margins, so the browser sizes it (see `render.ts`).
+- **Drag and drop:**
+  - Task bars and milestones can be dragged between bar lines and timelines. A drop on a bar line goes to the line under the pointer. The bar has a virtual half line above its first line and below its last; dropping there inserts a new line at the top or bottom.
+  - Any entry can be dragged into a callout area. The label's `callout_offset` is set from where it lands (for a bar, the label's corner goes at the pointer).
+  - A drop outside every area (past the view's edge, on a name, or on the time scale) goes to the vertically nearest callout area, which grows to include the new position.
+  - The number of bar lines is not part of the data: it is always calculated as the highest `line` the timeline's entries use, plus one, at least 1. Inserting a line shifts the lines below it down by one. After every move, the affected timelines are trimmed: blank lines above the first used line are removed by renumbering the entries so the first used line is 0, and blank lines after the last used line are not counted. Gaps between used lines stay. The bar never shows blank lines above the first used line, even in loaded data that has them.
+  - Escape cancels a drag. Dropping does not change a task's dates.
+
+### Not built yet
+
+- Renaming, adding, removing and reordering timelines in the UI. Today these come only from the data.
+- Editing a task's dates or duration by dragging or resizing.
+- Keyboard and screen-reader support for moving entries.
+- REST endpoints for creating and editing tasks and timelines (**TBD**).
+
+## Data format
+
+Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/basic.html) for a runnable version and [src/types.ts](src/types.ts) for the full types.
+
+```js
+{
+  version: 7,                          // optional; server version, used by the REST API
+  view: {
+    id: "v1",                          // required when api_url is set
+    name: "Example", start_date: "2026-03-01", finish_date: "2026-05-01",
+    scale: "week",                     // default "day"
+    name_position: "left",             // default "left"
+    milestone_symbol: "diamond",       // default "diamond"
+    show_dates: true                   // default true: Start/Finish dates beside each bar
+  },
+  tasks: [
+    { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d" },   // finishes 2026-04-03
+    { id: 2, text: "Milestone #1", start_date: "2026-04-10", symbol: "star" }   // no duration → milestone
+  ],
+  timelines: [
+    { id: 1, name: "Project", entries: [
+      { task: 1, placement: "on", line: 1 },
+      { task: 2, placement: "below", callout_offset: { x: 30, y: 16 } }
+    ]}
+  ]
+}
+```
+
+`parse()` throws on invalid data: bad dates or durations, duplicate task ids, entries for unknown tasks, a task twice on one timeline, a bar entry without `line` or with `callout_offset`, a callout with `line`, or a `callout_offset.y` on the wrong side of the bar.
+
+## JavaScript API
+
+| Call | Purpose |
+|------|---------|
+| `timeline.init(container, { api_url?, fetch? })` | Creates the default instance in an element or element id. |
+| `timeline.parse(data)` | Loads data and renders it. |
+| `timeline.load(view_id)` | Loads with `GET /views/{view_id}` (needs `api_url`). |
+| `timeline.serialize()` | Returns the current data. |
+| `timeline.moveEntry(timeline_id, task_id, patch)` | Moves an entry, as a drop does. Takes the PATCH body below, without `version`. |
+| `timeline.on("entry_moved" \| "move_failed", handler)` | Subscribes to events. Returns an unsubscribe function. |
+| `new timeline.TimelineView(container, options)` | Separate instance, for more than one view on a page. Same methods. |
+
+## REST API
+
+The API is optional. Turn it on with `timeline.init("timeline_here", { api_url: "https://example.com/api" })`. All paths are relative to `api_url`. Bodies are JSON in the data format above. The full spec is [docs/api/openapi.yaml](docs/api/openapi.yaml).
+
+### Load a view
+
+`GET /views/{view_id}` returns the whole view in the `parse()` format, including `version`.
+
+### Move a callout
+
+`PATCH /views/{view_id}/timelines/{timeline_id}/entries/{task_id}`
+
+This covers every way a user can move a callout: dragging the label to a new position (offset), switching side (`above` / `below`), moving it onto the bar (`on`), or dragging it to another timeline. Bars and milestones on the bar use the same call. Send only the fields that change:
+
+```json
+{
+  "timeline_id": 2,
+  "placement": "above",
+  "callout_offset": { "x": 40, "y": -60 },
+  "version": 7
+}
+```
+
+| Field            | Meaning |
+|------------------|---------|
+| `timeline_id`    | Target timeline, when the entry moves to a different timeline. Leave it out to stay on the current one. |
+| `placement`      | New area: `above`, `on`, or `below`. Moving to `on` drops `callout_offset`. |
+| `line`           | Bar line, only with placement `on`, from 0 to one past the last line (which opens a new line at the bottom). Defaults to 0 when coming from another area or timeline, otherwise the current line. |
+| `new_line`       | `true` inserts a new bar line at `line` and shifts the lines from there down by one. Only with placement `on`. The UI sends `line: 0` (top) or one past the last line (bottom). |
+| `callout_offset` | New `{ x, y }` (see [User interface](#user-interface)). Only for `above` and `below`; `y` must be on the right side of the bar. If left out, a callout keeps its offset, mirrored (`y` → `-y`) when it switches side; an entry coming from the bar gets the default. |
+| `version`        | The view version the client last saw, for optimistic concurrency. |
+
+Responses:
+
+- **200** returns `{ "version": 8, "timelines": [ ... ] }`, the full entries of every timeline the move affected (the source timeline and, if different, the target). The client replaces those timelines with the response.
+- **404:** the view, timeline, or entry doesn't exist.
+- **409:** the `version` is stale, or the task is already on the target timeline. The response body holds the current view, and the client re-renders from it.
+- **422:** invalid values: an unknown `placement`; `line` that is negative, more than one past the last line, or sent for a callout; `new_line` for a callout; `callout_offset` with `on`; or `callout_offset.y` on the wrong side of the bar.
+
+Client behavior:
+
+- The component applies the move at once (optimistic update), fires `entry_moved`, then sends the PATCH.
+- Requests are sent one at a time, in order.
+- On 409 the view re-renders from the response body. On any other error it rolls back to the state before the move and fires `move_failed`.
+- Moves queued behind a failed one are cancelled and rolled back with it.

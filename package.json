@@ -1,0 +1,34 @@
+{
+  "name": "timeline-view",
+  "version": "0.1.0",
+  "description": "A web-based timeline component for displaying and editing timelines.",
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/timelineview.js",
+  "module": "./dist/timelineview.mjs",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/timelineview.mjs",
+      "default": "./dist/timelineview.js"
+    },
+    "./timelineview.css": "./dist/timelineview.css"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "jsdom": "^31.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0"
+  }
+}

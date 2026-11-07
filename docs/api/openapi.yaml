@@ -1,0 +1,255 @@
+openapi: 3.1.0
+info:
+  title: Timeline view REST API
+  version: 0.1.0
+  description: |
+    Backend interface the timeline view calls when `api_url` is set.
+    Paths are relative to `api_url`. A host application implements this API;
+    the component only calls it. The move rules are the same as
+    `TimelineModel.moveEntry` in the library, which a JavaScript backend can reuse.
+
+paths:
+  /views/{view_id}:
+    parameters:
+      - $ref: "#/components/parameters/ViewId"
+    get:
+      summary: Load a view
+      operationId: getView
+      responses:
+        "200":
+          description: The whole view, including its current version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TimelineViewData" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /views/{view_id}/timelines/{timeline_id}/entries/{task_id}:
+    parameters:
+      - $ref: "#/components/parameters/ViewId"
+      - name: timeline_id
+        in: path
+        required: true
+        description: The timeline the entry is on now.
+        schema: { $ref: "#/components/schemas/Id" }
+      - name: task_id
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+    patch:
+      summary: Move an entry (callout, bar or milestone)
+      operationId: moveEntry
+      description: |
+        Moves an entry to another label position, bar line, area or timeline.
+        Send only the fields that change. Callouts are placed only by
+        `callout_offset`; `line` is for bar (`on`) entries. `new_line: true`
+        inserts a new bar line at `line`, and a `line` one past the last also
+        opens one. Afterwards the source and target timelines are trimmed:
+        if the first used bar line isn't 0, every bar entry moves up so it is.
+        The number of bar lines is never stored: it is the highest `line` used
+        plus one (at least 1). Gaps between used lines stay.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MovePatch" }
+            example:
+              timeline_id: 2
+              placement: above
+              callout_offset: { x: 40, y: -60 }
+              version: 7
+      responses:
+        "200":
+          description: Moved. Returns every timeline the move changed (source, then target).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MoveResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            `version` is stale, or the task is already on the target timeline.
+            The body is the current view; the client re-renders from it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TimelineViewData" }
+        "422":
+          description: |
+            Invalid values: unknown `placement`; a `line` that is negative, past
+            the last line + 1, or sent for a callout; `new_line` for a callout; `callout_offset`
+            together with placement `on`; or `callout_offset.y` on the wrong side
+            of the bar.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  parameters:
+    ViewId:
+      name: view_id
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Id" }
+
+  responses:
+    NotFound:
+      description: The view, timeline or entry does not exist.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Id:
+      oneOf:
+        - type: string
+        - type: integer
+
+    Date:
+      type: string
+      description: ISO 8601, `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm`.
+      pattern: '^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$'
+
+    Placement:
+      type: string
+      enum: [above, on, below]
+
+    MilestoneSymbol:
+      type: string
+      enum: [diamond, circle, square, triangle, star]
+
+    Offset:
+      type: object
+      description: |
+        Label position in px from the attachment point: the bar's edge at the
+        middle of the task's span (a milestone's date).
+        `x`: to the label's left edge.
+        `y`: to the label's edge nearest the bar; ≤ 0 above the bar, ≥ 0 below.
+        Default when missing: `{ x: 0, y: -16 }` above, `{ x: 0, y: 16 }` below.
+      required: [x, y]
+      properties:
+        x: { type: number }
+        y: { type: number }
+
+    View:
+      type: object
+      required: [name, start_date, finish_date]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        name: { type: string }
+        start_date: { $ref: "#/components/schemas/Date" }
+        finish_date: { $ref: "#/components/schemas/Date" }
+        scale:
+          type: string
+          enum: [hour, day, week, month, year]
+          default: day
+        name_position:
+          type: string
+          enum: [left, right]
+          default: left
+        milestone_symbol:
+          allOf: [{ $ref: "#/components/schemas/MilestoneSymbol" }]
+          default: diamond
+        show_dates:
+          type: boolean
+          default: true
+          description: Show the start and finish dates, with "Start" and "Finish" captions, beside each bar.
+
+    Task:
+      type: object
+      description: The finish date is `start_date + duration`; it is derived and never sent.
+      required: [id, text, start_date]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        text: { type: string }
+        start_date: { $ref: "#/components/schemas/Date" }
+        duration:
+          type: string
+          description: Whole number plus h, d, w, m (months) or y. Missing or zero means milestone.
+          pattern: '^\d+[hdwmy]$'
+        symbol: { $ref: "#/components/schemas/MilestoneSymbol" }
+
+    Entry:
+      description: A bar entry has `line`; a callout has `callout_offset` and no line.
+      oneOf:
+        - type: object
+          required: [task, placement, line]
+          additionalProperties: false
+          properties:
+            task: { $ref: "#/components/schemas/Id" }
+            placement: { const: "on" }
+            line: { type: integer, minimum: 0 }
+        - type: object
+          required: [task, placement]
+          additionalProperties: false
+          properties:
+            task: { $ref: "#/components/schemas/Id" }
+            placement: { enum: [above, below] }
+            callout_offset: { $ref: "#/components/schemas/Offset" }
+
+    Timeline:
+      type: object
+      required: [id, name, entries]
+      description: |
+        The bar has one more line than the highest `line` its entries use, and
+        at least one. The count is never stored.
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        name: { type: string }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/Entry" }
+
+    TimelineViewData:
+      type: object
+      required: [view, tasks, timelines]
+      properties:
+        version: { type: integer }
+        view: { $ref: "#/components/schemas/View" }
+        tasks:
+          type: array
+          items: { $ref: "#/components/schemas/Task" }
+        timelines:
+          type: array
+          items: { $ref: "#/components/schemas/Timeline" }
+
+    MovePatch:
+      type: object
+      properties:
+        timeline_id:
+          allOf: [{ $ref: "#/components/schemas/Id" }]
+          description: Target timeline. Leave out to stay on the current one.
+        placement: { $ref: "#/components/schemas/Placement" }
+        line:
+          type: integer
+          minimum: 0
+          description: |
+            Bar line; only with placement `on`. Defaults to 0 when coming from
+            another area or timeline, otherwise the current line.
+        new_line:
+          type: boolean
+          description: |
+            With placement `on`: insert a new bar line at `line` (0 to one past the last line);
+            the lines from there down shift by one.
+        callout_offset:
+          allOf: [{ $ref: "#/components/schemas/Offset" }]
+          description: |
+            Only for `above` and `below`. If left out, a callout keeps its offset,
+            mirrored (`y` → `-y`) when it switches side; an entry coming from the
+            bar gets the default.
+        version:
+          type: integer
+          description: The view version the client last saw.
+
+    MoveResult:
+      type: object
+      required: [version, timelines]
+      properties:
+        version: { type: integer }
+        timelines:
+          type: array
+          items: { $ref: "#/components/schemas/Timeline" }
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
