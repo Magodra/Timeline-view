@@ -2,7 +2,7 @@
 
 A timeline view for web planning applications. Framework-free TypeScript with no runtime dependencies.
 
-![Two timelines with task bars, milestones and callouts above and below the bars](https://magodra.github.io/ar-timeline-view/docs/images/features.svg)
+![Two timelines with task bars, milestones and callouts above and below the bars](https://github.com/Magodra/ar-timeline-view/docs/images/features.svg)
 
 - Several timelines stacked in one view, each with its own date range, on an hour, day, week, month or year scale.
 - Relative timelines that each fill the width, or absolute ones on a common time axis.
@@ -14,7 +14,7 @@ A timeline view for web planning applications. Framework-free TypeScript with no
 - Export as SVG (`toSVG()`).
 - Optional REST backend for saving moves, with optimistic updates and rollback.
 
-**Documentation:** [getting started](https://magodra.github.io/ar-timeline-view/docs/getting-started.html) · [user guide](https://magodra.github.io/ar-timeline-view/docs/user-guide.html) · [developer guide](https://magodra.github.io/ar-timeline-view/docs/developer-guide.html) · [REST API](https://magodra.github.io/ar-timeline-view/docs/api/openapi.yaml)
+**Documentation:** [getting started](https://github.com/Magodra/ar-timeline-view/docs/getting-started.html) · [user guide](https://github.com/Magodra/ar-timeline-view/docs/user-guide.html) · [developer guide](https://github.com/Magodra/ar-timeline-view/docs/developer-guide.html) · [REST API](https://github.com/Magodra/ar-timeline-view/docs/api/openapi.yaml)
 
 ## Install
 
@@ -63,11 +63,11 @@ The UMD build sets a global `timeline` object with a default instance:
 
 Either example renders this:
 
-![One timeline with a task bar and a milestone callout below it](https://magodra.github.io/ar-timeline-view/docs/images/basic.svg)
+![One timeline with a task bar and a milestone callout below it](https://github.com/Magodra/ar-timeline-view/docs/images/basic.svg)
 
 With `view.absolute: true`, timelines with different date ranges share one time axis:
 
-![Three timelines with different date ranges on a common time axis; tasks that continue past a range end in arrows](https://magodra.github.io/ar-timeline-view/docs/images/absolute.svg)
+![Three timelines with different date ranges on a common time axis; tasks that continue past a range end in arrows](https://github.com/Magodra/ar-timeline-view/docs/images/absolute.svg)
 
 ## Save changes
 
@@ -79,7 +79,7 @@ timeline.on("entry_moved", ({ timeline_id, task_id, patch }) => {
 });
 ```
 
-Or point it at a backend that implements the [REST API](https://magodra.github.io/ar-timeline-view/docs/api/openapi.yaml):
+Or point it at a backend that implements the [REST API](https://github.com/Magodra/ar-timeline-view/docs/api/openapi.yaml):
 
 ```js
 timeline.init("timeline_here", { api_url: "https://example.com/api" });
@@ -99,7 +99,7 @@ Works in current evergreen browsers (Chrome, Edge, Firefox, Safari).
 
 ## Links
 
-- Documentation: <https://magodra.github.io/ar-timeline-view/>
+- Documentation: <https://github.com/Magodra/ar-timeline-view/>
 - Source and issues: <https://github.com/Magodra/ar-timeline-view>
 
 ## License
