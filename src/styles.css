@@ -79,6 +79,11 @@
   padding: 0 var(--tlv-date-width);
 }
 
+/* The bar and its callout areas. With view.absolute, render.ts sets its offset and width. */
+.tlv-span {
+  position: relative;
+}
+
 /*
  * Callout areas: one-cell grids. All labels share the cell and are placed with
  * margins, so the area's height always fits every label. The padding on the
@@ -259,6 +264,19 @@
   border-radius: 0 0 4px 4px;
 }
 
+/* A task that continues past the timeline's range: a pointed end on that side (the clip also removes the rounding there). */
+.tlv-edge-bar--before {
+  clip-path: polygon(6px 0, 100% 0, 100% 100%, 6px 100%, 0 50%);
+}
+
+.tlv-edge-bar--after {
+  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 0 100%);
+}
+
+.tlv-edge-bar--before.tlv-edge-bar--after {
+  clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 6px 100%, 0 50%);
+}
+
 /* Centered on the bar's edge; reaches about 8px out (EDGE_SYMBOL_REACH in render.ts). */
 .tlv-edge-symbol {
   margin-left: -7px;
@@ -294,6 +312,54 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/*
+ * A task that continues past the timeline's start or finish: a square end and
+ * a small arrow pointing out on that side.
+ */
+.tlv-task--before {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.tlv-task--after {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.tlv-task--before .tlv-task-label {
+  padding-left: 13px;
+}
+
+.tlv-task--after .tlv-task-label {
+  padding-right: 13px;
+}
+
+/* A stub at the finish edge (task entirely after the range): label on the inner side, not over the finish date. */
+.tlv-task--outside-after .tlv-task-label {
+  left: auto;
+  right: 100%;
+}
+
+.tlv-arrow {
+  position: absolute;
+  top: 50%;
+  width: 5px;
+  height: 8px;
+  margin-top: -4px;
+  background: var(--tlv-task-text);
+  pointer-events: none;
+}
+
+.tlv-arrow--before {
+  left: 3px;
+  clip-path: polygon(100% 0, 0 50%, 100% 100%);
+}
+
+.tlv-arrow--after {
+  right: 3px;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
 }
 
 /* Too narrow to hold its label: show the label beside the bar instead. */

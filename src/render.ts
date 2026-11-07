@@ -1,6 +1,6 @@
 import { formatDate } from "./dates";
-import { firstLine, lineCount, type Entry, type Task, type Timeline, type TimelineModel } from "./model";
-import { fraction, ticks } from "./scale";
+import { firstLine, lineCount, viewRange, type Entry, type Task, type Timeline, type TimelineModel } from "./model";
+import { fraction, periodSerial, ticks } from "./scale";
 
 /** Bar line height in px. The drag code reads positions from the DOM, so only rendering uses this. */
 export const BAR_LINE_HEIGHT = 28;
@@ -12,6 +12,9 @@ export const BAR_LINE_HEIGHT = 28;
  */
 export const EDGE_BAR_HEIGHT = 6;
 export const EDGE_SYMBOL_REACH = 8;
+
+/** Width, in px, of a task drawn at the edge because it lies entirely outside its timeline's range. */
+const TASK_STUB_WIDTH = 14;
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const pct = (n: number) => `${(n * 100).toFixed(4)}%`;
@@ -35,12 +38,44 @@ export function render(root: HTMLElement, model: TimelineModel): void {
   layoutConnectors(root);
 }
 
-/** A task's span within the view, as fractions of the width, clamped to the view. */
-function span(model: TimelineModel, task: Task) {
-  const { start, finish } = model.view;
+/**
+ * A task's span within its timeline, as fractions of the bar's width, clamped
+ * to the bar. `before` and `after` say a task continues past the timeline's
+ * start or finish (milestones never do).
+ */
+function span(timeline: Timeline, task: Task) {
+  const { start, finish } = timeline;
   const from = clamp01(fraction(task.start, start, finish));
   const to = task.isMilestone ? from : clamp01(fraction(task.finish, start, finish));
-  return { from, to, center: (from + to) / 2 };
+  const before = !task.isMilestone && task.start < start;
+  const after = !task.isMilestone && task.finish > finish;
+  return { from, to, center: (from + to) / 2, before, after };
+}
+
+/**
+ * Positions a bar-like element over a span. A task entirely outside the range
+ * keeps a small stub at the nearest edge, marked `--outside-before` or
+ * `--outside-after` so its label can go on the inner side.
+ */
+function placeSpan(node: HTMLElement, base: string, from: number, to: number): void {
+  if (to <= 0) {
+    node.style.left = "0";
+    node.style.width = `${TASK_STUB_WIDTH}px`;
+    node.classList.add(`${base}--outside-before`);
+  } else if (from >= 1) {
+    node.style.left = `calc(100% - ${TASK_STUB_WIDTH}px)`;
+    node.style.width = `${TASK_STUB_WIDTH}px`;
+    node.classList.add(`${base}--outside-after`);
+  } else {
+    node.style.left = pct(from);
+    node.style.width = pct(to - from);
+  }
+}
+
+/** Marks a task that continues past its timeline's start or finish. */
+function continuation(node: HTMLElement, base: string, before: boolean, after: boolean): void {
+  node.classList.toggle(`${base}--before`, before);
+  node.classList.toggle(`${base}--after`, after);
 }
 
 function renderTimeline(model: TimelineModel, timeline: Timeline): HTMLElement {
@@ -48,12 +83,23 @@ function renderTimeline(model: TimelineModel, timeline: Timeline): HTMLElement {
   row.dataset.timeline = String(timeline.id);
   row.setAttribute("aria-label", timeline.name);
 
-  const center = el("div", "tlv-center");
-  center.append(
+  // The span holds the bar and its callout areas. It fills the width, or with
+  // `absolute` sits at the timeline's place on the view's common time axis.
+  const spanNode = el("div", "tlv-span");
+  const range = viewRange(model);
+  if (model.view.absolute && range) {
+    const from = fraction(timeline.start, range.start, range.finish);
+    const to = fraction(timeline.finish, range.start, range.finish);
+    spanNode.style.marginLeft = pct(from);
+    spanNode.style.width = pct(to - from);
+  }
+  spanNode.append(
     renderCalloutArea(model, timeline, "above"),
     renderBar(model, timeline),
     renderCalloutArea(model, timeline, "below"),
   );
+  const center = el("div", "tlv-center");
+  center.append(spanNode);
   row.append(el("div", "tlv-name", timeline.name), center);
   return row;
 }
@@ -79,18 +125,25 @@ function dateLabel(kind: "start" | "finish", caption: string, date: Date): HTMLE
 }
 
 function renderBar(model: TimelineModel, timeline: Timeline): HTMLElement {
-  const { start, finish, scale, showDates } = model.view;
+  const { scale, showDates } = model.view;
+  const { start, finish } = timeline;
   const bar = el("div", "tlv-bar");
   if (showDates) bar.append(dateLabel("start", "Start", start), dateLabel("finish", "Finish", finish));
 
-  // Time scale: periods between ticks, alternately light and darker, with the tick labels on top.
+  // Time scale: periods between ticks, alternately light and darker, with the
+  // tick labels on top. The shading follows the calendar period, so it lines
+  // up across timelines that start on different dates.
   const scaleRow = el("div", "tlv-scale");
   const tickList = ticks(start, finish, scale);
-  const edges = [0, ...tickList.map((t) => t.at).filter((at) => at > 0 && at < 1), 1];
+  const edges = [
+    { at: 0, serial: periodSerial(start, scale) },
+    ...tickList.filter((t) => t.at > 0 && t.at < 1).map((t) => ({ at: t.at, serial: t.serial })),
+    { at: 1, serial: 0 },
+  ];
   for (let i = 0; i < edges.length - 1; i++) {
-    const period = el("span", `tlv-period${i % 2 ? " tlv-period--alt" : ""}`);
-    period.style.left = pct(edges[i]);
-    period.style.width = pct(edges[i + 1] - edges[i]);
+    const period = el("span", `tlv-period${edges[i].serial % 2 ? " tlv-period--alt" : ""}`);
+    period.style.left = pct(edges[i].at);
+    period.style.width = pct(edges[i + 1].at - edges[i].at);
     scaleRow.append(period);
   }
   for (const tick of tickList) {
@@ -131,7 +184,7 @@ function renderBar(model: TimelineModel, timeline: Timeline): HTMLElement {
 
 function renderOnEntry(model: TimelineModel, timeline: Timeline, entry: Entry): HTMLElement {
   const task = model.findTask(entry.taskId)!;
-  const { from, to, center } = span(model, task);
+  const { from, to, center, before, after } = span(timeline, task);
   const title = `${task.text} (${taskDates(task)})`;
 
   if (task.isMilestone) {
@@ -146,11 +199,14 @@ function renderOnEntry(model: TimelineModel, timeline: Timeline, entry: Entry): 
   }
 
   const node = entryElement("tlv-task", timeline, entry, center);
-  node.style.left = pct(from);
-  node.style.width = pct(to - from);
+  placeSpan(node, "tlv-task", from, to);
   node.title = title;
   // The stylesheet moves the label beside the bar when the bar is too narrow for it.
   node.append(el("span", "tlv-task-label", task.text));
+  // A task that continues past the timeline's start or finish gets an arrow at that end.
+  continuation(node, "tlv-task", before, after);
+  if (before) node.append(el("span", "tlv-arrow tlv-arrow--before"));
+  if (after) node.append(el("span", "tlv-arrow tlv-arrow--after"));
   return node;
 }
 
@@ -168,7 +224,7 @@ function renderCalloutArea(model: TimelineModel, timeline: Timeline, placement: 
   for (const entry of timeline.entries) {
     if (entry.placement !== placement) continue;
     const task = model.findTask(entry.taskId)!;
-    const { from, to, center } = span(model, task);
+    const { from, to, center, before, after } = span(timeline, task);
     const { x, y } = entry.calloutOffset;
 
     let marker: HTMLElement;
@@ -179,8 +235,9 @@ function renderCalloutArea(model: TimelineModel, timeline: Timeline, placement: 
       reach = EDGE_SYMBOL_REACH;
     } else {
       marker = el("span", "tlv-edge-bar");
-      marker.style.left = pct(from);
-      marker.style.width = pct(to - from);
+      placeSpan(marker, "tlv-edge-bar", from, to);
+      // A task that continues past the range gets a pointed end there.
+      continuation(marker, "tlv-edge-bar", before, after);
       reach = EDGE_BAR_HEIGHT;
     }
 

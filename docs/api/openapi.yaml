@@ -132,12 +132,17 @@ components:
 
     View:
       type: object
-      required: [name, start_date, finish_date]
+      required: [name]
       properties:
         id: { $ref: "#/components/schemas/Id" }
         name: { type: string }
-        start_date: { $ref: "#/components/schemas/Date" }
-        finish_date: { $ref: "#/components/schemas/Date" }
+        absolute:
+          type: boolean
+          default: false
+          description: |
+            `false`: each timeline's bar fills the full width, scaled to its own
+            range. `true`: all timelines share one time axis, from the earliest
+            timeline start to the latest finish, and each bar is placed on it.
         scale:
           type: string
           enum: [hour, day, week, month, year]
@@ -152,7 +157,7 @@ components:
         show_dates:
           type: boolean
           default: true
-          description: Show the start and finish dates, with "Start" and "Finish" captions, beside each bar.
+          description: Show each timeline's start and finish dates, with "Start" and "Finish" captions, beside its bar.
 
     Task:
       type: object
@@ -188,13 +193,19 @@ components:
 
     Timeline:
       type: object
-      required: [id, name, entries]
+      required: [id, name, start_date, finish_date, entries]
       description: |
         The bar has one more line than the highest `line` its entries use, and
         at least one. The count is never stored.
       properties:
         id: { $ref: "#/components/schemas/Id" }
         name: { type: string }
+        start_date:
+          allOf: [{ $ref: "#/components/schemas/Date" }]
+          description: Start of the timeline's range. Tasks before it are cut off at the bar's edge.
+        finish_date:
+          allOf: [{ $ref: "#/components/schemas/Date" }]
+          description: Finish of the timeline's range; after `start_date`.
         entries:
           type: array
           items: { $ref: "#/components/schemas/Entry" }

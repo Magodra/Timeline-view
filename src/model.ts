@@ -19,8 +19,7 @@ import type {
 export interface View {
   id?: Id;
   name: string;
-  start: Date;
-  finish: Date;
+  absolute: boolean;
   scale: Scale;
   namePosition: NamePosition;
   milestoneSymbol: MilestoneSymbol;
@@ -45,6 +44,8 @@ export type Entry =
 export interface Timeline {
   id: Id;
   name: string;
+  start: Date;
+  finish: Date;
   entries: Entry[];
 }
 
@@ -108,20 +109,19 @@ export class TimelineModel {
   static fromData(data: TimelineViewData): TimelineModel {
     if (!data?.view) throw new Error("Timeline data needs a `view`");
     const v = data.view;
-    const start = parseDate(v.start_date);
-    const finish = parseDate(v.finish_date);
-    if (finish <= start) throw new Error("view.finish_date must be after view.start_date");
     const scale = v.scale ?? "day";
     if (!SCALES.includes(scale)) throw new Error(`Unknown scale "${scale}"`);
     if (v.show_dates !== undefined && typeof v.show_dates !== "boolean") {
       throw new Error("view.show_dates must be true or false");
     }
+    if (v.absolute !== undefined && typeof v.absolute !== "boolean") {
+      throw new Error("view.absolute must be true or false");
+    }
 
     const view: View = {
       id: v.id,
       name: v.name ?? "",
-      start,
-      finish,
+      absolute: v.absolute ?? false,
       scale,
       namePosition: v.name_position ?? "left",
       milestoneSymbol: v.milestone_symbol ?? "diamond",
@@ -148,8 +148,7 @@ export class TimelineModel {
       view: {
         ...(v.id !== undefined && { id: v.id }),
         name: v.name,
-        start_date: formatDate(v.start),
-        finish_date: formatDate(v.finish),
+        absolute: v.absolute,
         scale: v.scale,
         name_position: v.namePosition,
         milestone_symbol: v.milestoneSymbol,
@@ -162,6 +161,9 @@ export class TimelineModel {
 
   /** Converts and validates one timeline. */
   timelineFromData(t: TimelineData): Timeline {
+    const start = parseDate(t.start_date);
+    const finish = parseDate(t.finish_date);
+    if (finish <= start) throw new Error(`Timeline ${t.id}: finish_date must be after start_date`);
     const entries = (t.entries ?? []).map((e) => this.entryFromData(t.id, e));
     const seen = new Set<string>();
     for (const e of entries) {
@@ -170,7 +172,7 @@ export class TimelineModel {
       }
       seen.add(String(e.taskId));
     }
-    return { id: t.id, name: t.name ?? "", entries };
+    return { id: t.id, name: t.name ?? "", start, finish, entries };
   }
 
   private entryFromData(timelineId: Id, e: EntryData): Entry {
@@ -293,6 +295,21 @@ function keptOffset(entry: Entry, placement: "above" | "below"): Offset {
   return entry.placement === placement ? { x, y } : { x, y: -y };
 }
 
+/**
+ * The time axis the view draws on: from the earliest timeline start to the
+ * latest finish. With `absolute`, every bar is placed on this axis.
+ */
+export function viewRange(model: TimelineModel): { start: Date; finish: Date } | undefined {
+  if (model.timelines.length === 0) return undefined;
+  let start = model.timelines[0].start;
+  let finish = model.timelines[0].finish;
+  for (const t of model.timelines) {
+    if (t.start < start) start = t.start;
+    if (t.finish > finish) finish = t.finish;
+  }
+  return { start, finish };
+}
+
 /** The lowest `line` the bar entries use; 0 when there are none. */
 export function firstLine(timeline: Timeline): number {
   const used = timeline.entries.flatMap((e) => (e.placement === "on" ? [e.line] : []));
@@ -349,6 +366,8 @@ export function timelineToData(t: Timeline): TimelineData {
   return {
     id: t.id,
     name: t.name,
+    start_date: formatDate(t.start),
+    finish_date: formatDate(t.finish),
     entries: t.entries.map((e) =>
       e.placement === "on"
         ? { task: e.taskId, placement: e.placement, line: e.line }

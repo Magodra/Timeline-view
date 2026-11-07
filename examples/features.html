@@ -13,14 +13,23 @@
     <p>
         Several timelines, a month scale, month and year durations, milestone symbols,
         names on the right, and callout labels at different heights above and below the bar.
+        "Support" runs past the timeline's finish, so its bar ends in an arrow.
     </p>
-    <div id="timeline_here" style="height: 640px;"></div>
+    <div id="timeline_here"></div>
+
+    <h2>Absolute timelines</h2>
+    <p>
+        A second view with <code>absolute: true</code>. Each timeline has its own start and finish
+        dates, and all of them share one time axis, so each bar sits at its place in time and the
+        same date lines up from timeline to timeline. Tasks that start before or finish after their
+        timeline's range end in an arrow on the bar, or a pointed marker for a callout.
+    </p>
+    <div id="absolute_here"></div>
     <script>
         timeline.init("timeline_here");
         timeline.parse({
             view: {
-                name: "Product plan", start_date: "2026-01-01", finish_date: "2027-07-01",
-                scale: "month", name_position: "right", milestone_symbol: "diamond"
+                name: "Product plan", scale: "month", name_position: "right", milestone_symbol: "diamond"
             },
             tasks: [
                 { id: "design", text: "Design", start_date: "2026-01-15", duration: "3m" },
@@ -33,17 +42,51 @@
                 { id: "kickoff", text: "Kick-off", start_date: "2026-01-12", symbol: "square" }
             ],
             timelines: [
-                { id: "dev", name: "Development", entries: [
+                { id: "dev", name: "Development", start_date: "2026-01-01", finish_date: "2027-07-01", entries: [
                     { task: "design", placement: "on", line: 0 },
                     { task: "build", placement: "on", line: 1 },
                     { task: "kickoff", placement: "above", callout_offset: { x: 0, y: -16 } },
                     { task: "review", placement: "above", callout_offset: { x: -40, y: -64 } },
                     { task: "beta", placement: "below", callout_offset: { x: 12, y: 16 } }
                 ]},
-                { id: "ops", name: "Operations", entries: [
+                { id: "ops", name: "Operations", start_date: "2026-01-01", finish_date: "2027-07-01", entries: [
                     { task: "launch", placement: "on", line: 0 },
                     { task: "support", placement: "on", line: 1 },
                     { task: "audit", placement: "below", callout_offset: { x: -60, y: 40 } }
+                ]}
+            ]
+        });
+    </script>
+    <script>
+        // A second view on the same page needs its own TimelineView.
+        // It is kept on window so the build can export it as an image.
+        window.absoluteView = new timeline.TimelineView("absolute_here");
+        absoluteView.parse({
+            view: { name: "Programme", scale: "month", absolute: true },
+            tasks: [
+                { id: "research", text: "Research", start_date: "2025-11-01", duration: "4m" },
+                { id: "prototype", text: "Prototype", start_date: "2026-03-15", duration: "4m" },
+                { id: "go", text: "Go decision", start_date: "2026-05-15", symbol: "diamond" },
+                { id: "build", text: "Build", start_date: "2026-04-01", duration: "6m" },
+                { id: "rollout", text: "Rollout", start_date: "2026-10-15", duration: "3m" },
+                { id: "migration", text: "Data migration", start_date: "2026-08-01", duration: "2m" },
+                { id: "launch", text: "Launch", start_date: "2026-10-15", symbol: "star" },
+                { id: "support", text: "Support", start_date: "2026-11-01", duration: "1y" }
+            ],
+            timelines: [
+                { id: "discovery", name: "Discovery", start_date: "2026-01-01", finish_date: "2026-06-01", entries: [
+                    { task: "research", placement: "on", line: 0 },
+                    { task: "prototype", placement: "on", line: 1 },
+                    { task: "go", placement: "above", callout_offset: { x: -40, y: -16 } }
+                ]},
+                { id: "delivery", name: "Delivery", start_date: "2026-03-01", finish_date: "2026-12-01", entries: [
+                    { task: "build", placement: "on", line: 0 },
+                    { task: "rollout", placement: "on", line: 1 }
+                ]},
+                { id: "operations", name: "Operations", start_date: "2026-09-01", finish_date: "2027-03-01", entries: [
+                    { task: "launch", placement: "on", line: 0 },
+                    { task: "support", placement: "on", line: 1 },
+                    { task: "migration", placement: "above", callout_offset: { x: 10, y: -16 } }
                 ]}
             ]
         });

@@ -1,4 +1,4 @@
-// Saves the basic and features examples as SVG images in docs/images, for the
+// Saves the example views as SVG images in docs/images, for the
 // README and the docs. Runs as the last step of `npm run build`: it serves the
 // repository, opens each example in headless Chrome against the built
 // dist/timelineview.js, as a host page would, and calls timeline.toSVG().
@@ -10,7 +10,12 @@ import puppeteer from "puppeteer";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const outDir = join(root, "docs", "images");
-const EXAMPLES = ["basic", "features"];
+/** Example page, the view on it to export (a global expression), and the image's name. */
+const EXPORTS = [
+  { page: "basic", view: "timeline", image: "basic" },
+  { page: "features", view: "timeline", image: "features" },
+  { page: "features", view: "absoluteView", image: "absolute" },
+];
 
 const TYPES = {
   ".html": "text/html",
@@ -61,12 +66,12 @@ try {
   page.on("pageerror", (e) => errors.push(e.message));
 
   await mkdir(outDir, { recursive: true });
-  for (const name of EXAMPLES) {
+  for (const { page: name, view, image } of EXPORTS) {
     await page.goto(`${base}/examples/${name}.html`, { waitUntil: "load" });
     await page.evaluate(() => document.fonts.ready);
     if (errors.length) throw new Error(`examples/${name}.html: ${errors.join("; ")}`);
-    const svg = await page.evaluate(() => timeline.toSVG());
-    const file = join(outDir, `${name}.svg`);
+    const svg = await page.evaluate((expr) => globalThis[expr].toSVG(), view);
+    const file = join(outDir, `${image}.svg`);
     await writeFile(file, svg + "\n");
     console.log(`Saved ${file.slice(root.length + 1).replaceAll("\\", "/")}`);
   }

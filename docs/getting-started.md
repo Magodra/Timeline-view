@@ -20,13 +20,13 @@ Build the library (`npm install`, then `npm run build`) and copy `dist/timelinev
     <script>
         timeline.init("timeline_here");
         timeline.parse({
-            view: { name: "Example", start_date: "2026-03-01", finish_date: "2026-05-01", scale: "week" },
+            view: { name: "Example", scale: "week" },
             tasks: [
                 { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d" },
                 { id: 2, text: "Milestone #1", start_date: "2026-04-10" }
             ],
             timelines: [
-                { id: 1, name: "Project", entries: [
+                { id: 1, name: "Project", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [
                     { task: 1, placement: "on", line: 1 },
                     { task: 2, placement: "below", callout_offset: { x: 30, y: 16 } }
                 ]}
@@ -36,6 +36,8 @@ Build the library (`npm install`, then `npm run build`) and copy `dist/timelinev
 </body>
 </html>
 ```
+
+The `height: 400px` on the container is optional. Without a height, the container fits the timelines exactly and grows as they grow. With one, the view scrolls inside it when the timelines are taller. See [Sizing the container](user-guide.md#sizing-the-container).
 
 ## Use it as a module
 

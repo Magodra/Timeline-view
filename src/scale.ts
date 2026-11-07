@@ -3,9 +3,15 @@ import type { Scale } from "./types";
 
 export interface Tick {
   date: Date;
-  /** Position in the view's time span, 0 to 1. */
+  /** Position in the timeline's time span, 0 to 1. */
   at: number;
   label: string;
+  /**
+   * Running number of the period that starts at this tick, counted from a
+   * fixed date. Its parity shades periods alternately, the same way on every
+   * timeline whatever its start date.
+   */
+  serial: number;
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -70,6 +76,24 @@ export function isoWeek(date: Date): number {
   return Math.ceil(((d.getTime() - yearStart) / 86_400_000 + 1) / 7);
 }
 
+/** Running number of the scale period that holds `date`. */
+export function periodSerial(date: Date, scale: Scale): number {
+  const ms = date.getTime();
+  switch (scale) {
+    case "hour":
+      return Math.floor(ms / 3_600_000);
+    case "day":
+      return Math.floor(ms / 86_400_000);
+    case "week":
+      // 1970-01-01 was a Thursday; weeks start on Monday.
+      return Math.floor((Math.floor(ms / 86_400_000) + 3) / 7);
+    case "month":
+      return date.getUTCFullYear() * 12 + date.getUTCMonth();
+    case "year":
+      return date.getUTCFullYear();
+  }
+}
+
 /** `isFirst`: the first tick shows the year (month scale) or date (hour scale) for context. */
 function label(date: Date, scale: Scale, isFirst: boolean): string {
   switch (scale) {
@@ -94,7 +118,12 @@ function label(date: Date, scale: Scale, isFirst: boolean): string {
 export function ticks(start: Date, finish: Date, scale: Scale): Tick[] {
   const result: Tick[] = [];
   for (let d = firstBoundary(start, scale); d <= finish && result.length < MAX_TICKS; d = next(d, scale)) {
-    result.push({ date: d, at: fraction(d, start, finish), label: label(d, scale, result.length === 0) });
+    result.push({
+      date: d,
+      at: fraction(d, start, finish),
+      label: label(d, scale, result.length === 0),
+      serial: periodSerial(d, scale),
+    });
   }
   return result;
 }

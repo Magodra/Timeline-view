@@ -6,7 +6,7 @@
 
 *[examples/features.html](../examples/features.html): two timelines on a month scale, with callouts above and below the bars.*
 
-A **view** holds one or more **timelines**, stacked vertically. Each timeline has three **areas**:
+A **view** holds one or more **timelines**, stacked vertically. Each timeline has its own time range (`start_date` to `finish_date`) and three **areas**:
 
 - **above:** callout labels above the bar.
 - **on:** the bar itself, with the time scale and task **lines**, numbered from 0.
@@ -24,8 +24,7 @@ A **task** is placed on a timeline by an **entry**, which says which area it goe
   view: {
     id: "v1",                         // needed with a REST backend
     name: "Example",
-    start_date: "2026-03-01",         // ISO 8601: YYYY-MM-DD or YYYY-MM-DDTHH:mm
-    finish_date: "2026-05-01",
+    absolute: false,                  // true: all timelines on one common time axis (default false)
     scale: "week",                    // hour | day | week | month | year (default day)
     name_position: "left",            // left | right (default left)
     milestone_symbol: "diamond",      // diamond | circle | square | triangle | star
@@ -36,7 +35,10 @@ A **task** is placed on a timeline by an **entry**, which says which area it goe
     { id: 2, text: "Milestone #1", start_date: "2026-04-10", symbol: "star" }
   ],
   timelines: [
-    { id: 1, name: "Project", entries: [
+    { id: 1, name: "Project",
+      start_date: "2026-03-01",       // ISO 8601: YYYY-MM-DD or YYYY-MM-DDTHH:mm
+      finish_date: "2026-05-01",
+      entries: [
       { task: 1, placement: "on", line: 1 },                                 // bar line 1
       { task: 2, placement: "below", callout_offset: { x: 30, y: 16 } }      // label below the bar
     ]}
@@ -62,7 +64,20 @@ Months and years follow the calendar: one month from 31 January ends on 28 Febru
 
 ### The bar
 
-The time scale on top of the bar shades its periods (days, weeks, months, ...) alternately light and darker. Beside the bar, the view's start date is shown under "Start" and its finish date under "Finish". Set `show_dates: false` to hide them and give the bar the full width.
+The time scale on top of the bar shades its periods (days, weeks, months, ...) alternately light and darker. Beside the bar, the timeline's start date is shown under "Start" and its finish date under "Finish". Set `show_dates: false` to hide them and give the bar the full width.
+
+A task that starts before its timeline's start date, or finishes after its finish date, is cut off at the bar's edge and gets a small arrow pointing out on that side. A task entirely outside the range is a short stub with an arrow at the nearest edge. As a callout, such a task's marker on the bar's edge gets a pointed end instead.
+
+### Absolute and relative timelines
+
+Each timeline has its own `start_date` and `finish_date`. The view's `absolute` option decides how the bars line up:
+
+- `absolute: false` (default): every bar fills the full width, scaled to its own range. Good for comparing the shape of each timeline.
+- `absolute: true`: all timelines share one time axis, from the earliest start to the latest finish. Each bar sits at its place on that axis, so the same date is at the same position on every timeline.
+
+![Three timelines with different date ranges on a common time axis; tasks that continue past a range end in arrows](images/absolute.svg)
+
+*The second view in [examples/features.html](../examples/features.html), with `absolute: true`.*
 
 ### Callouts
 
@@ -77,6 +92,31 @@ A dashed connector runs from the middle of the marker to the label. `callout_off
 - `y`: to the label's edge nearest the bar. Zero or negative above the bar, zero or positive below it.
 
 Without `callout_offset`, a label sits 16 pixels from the bar. The area grows or shrinks so every label fits inside it.
+
+## Sizing the container
+
+The view fills the element you pass to `init()` (or `new TimelineView()`). Its contents always take the height they need: the timelines stacked, each as tall as its bar lines plus callout areas that fit their labels. How the element's own size relates to that:
+
+| Container | What you get |
+|-----------|--------------|
+| No height (`height: auto`, the default for a `div`) | The container is exactly as tall as the timelines. It grows and shrinks as entries move (a new bar line, a label dragged further out), and the page below moves with it. Nothing scrolls inside the view. |
+| A fixed `height`, taller than the content | The timelines sit at the top, with the view's background as empty space below. |
+| A fixed `height`, shorter than the content | The view scrolls vertically inside the container. The timelines are not squeezed; they keep their full height. |
+| `max-height` | Grows with the content, like no height, up to the limit, then scrolls. Often the best choice in a page layout. |
+| `height: 100%` | Only works if the parent has a definite height (for example a flex or grid cell, or a parent with its own `height`). Otherwise it behaves like no height. |
+
+Width works the same way: without a width the container fills its parent, and the bars stretch to the available width. Each timeline is at least 480 px wide; in a narrower container the view scrolls sideways.
+
+The container's size never changes the time scale's dates or the callout offsets, only what is visible. `toSVG()` exports the timelines' full extent, whatever the container's size and scroll position, without empty space below.
+
+```html
+<!-- Fits its content: -->
+<div id="timeline_here"></div>
+<!-- Fixed size, scrolls when the content is taller: -->
+<div id="timeline_here" style="height: 400px;"></div>
+<!-- Grows up to 600px, then scrolls: -->
+<div id="timeline_here" style="max-height: 600px;"></div>
+```
 
 ## Moving entries
 

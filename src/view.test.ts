@@ -5,7 +5,7 @@ import { TimelineView, type MoveFailedEvent } from "./view";
 function sample(): TimelineViewData {
   return {
     version: 7,
-    view: { id: "v1", name: "Example", start_date: "2026-03-01", finish_date: "2026-05-01", scale: "week" },
+    view: { id: "v1", name: "Example", scale: "week" },
     tasks: [
       { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d" },
       { id: 2, text: "Milestone #1", start_date: "2026-04-10", symbol: "star" },
@@ -14,6 +14,8 @@ function sample(): TimelineViewData {
       {
         id: 1,
         name: "Project",
+        start_date: "2026-03-01",
+        finish_date: "2026-05-01",
         entries: [
           { task: 1, placement: "on", line: 1 },
           { task: 2, placement: "below", callout_offset: { x: 30, y: 16 } },
@@ -116,6 +118,76 @@ describe("rendering", () => {
     data.timelines[0].entries[1] = { task: 2, placement: "on", line: 0 };
     new TimelineView("tl").parse(data);
     expect(container.querySelector(".tlv-milestone .tlv-symbol--star")).not.toBeNull();
+  });
+});
+
+describe("timeline ranges", () => {
+  const twoTimelines = (absolute: boolean): TimelineViewData => {
+    const data = sample();
+    data.view.absolute = absolute;
+    data.timelines.push({ id: 2, name: "Later", start_date: "2026-04-01", finish_date: "2026-06-01", entries: [] });
+    return data;
+  };
+  const spans = () => [...container.querySelectorAll<HTMLElement>(".tlv-span")];
+
+  it("fills the width with every bar by default", () => {
+    new TimelineView("tl").parse(twoTimelines(false));
+    expect(spans().map((s) => [s.style.marginLeft, s.style.width])).toEqual([
+      ["", ""],
+      ["", ""],
+    ]);
+    const finish = container.querySelectorAll(".tlv-date--finish .tlv-date-value");
+    expect([...finish].map((d) => d.textContent)).toEqual(["2026-05-01", "2026-06-01"]);
+  });
+
+  it("places each bar on a common time axis with absolute: true", () => {
+    new TimelineView("tl").parse(twoTimelines(true));
+    // The view runs from 2026-03-01 to 2026-06-01: 92 days.
+    const [first, second] = spans();
+    expect(parseFloat(first.style.marginLeft)).toBe(0);
+    expect(parseFloat(first.style.width)).toBeCloseTo((61 / 92) * 100, 3);
+    expect(parseFloat(second.style.marginLeft)).toBeCloseTo((31 / 92) * 100, 3);
+    expect(parseFloat(second.style.width)).toBeCloseTo((61 / 92) * 100, 3);
+  });
+
+  it("shades the same calendar periods alike on every timeline", () => {
+    new TimelineView("tl").parse(twoTimelines(true));
+    const shadeOfWeek = (timeline: number, left: number) =>
+      [...container.querySelectorAll<HTMLElement>(`.tlv-timeline[data-timeline="${timeline}"] .tlv-period`)]
+        .find((p) => Math.abs(parseFloat(p.style.left) - left) < 0.001)!
+        .classList.contains("tlv-period--alt");
+    // The week of Monday 2026-04-06: 36 days into timeline 1, 5 days into timeline 2 (61-day ranges).
+    expect(shadeOfWeek(1, (36 / 61) * 100)).toBe(shadeOfWeek(2, (5 / 61) * 100));
+  });
+
+  it("marks tasks that continue past the timeline's range with arrows", () => {
+    const data = sample();
+    data.tasks.push(
+      { id: 3, text: "Earlier", start_date: "2026-02-20", duration: "2w" },
+      { id: 4, text: "Later", start_date: "2026-06-10", duration: "1w" },
+      { id: 5, text: "Longer", start_date: "2026-04-20", duration: "1m" },
+    );
+    data.timelines[0].entries.push(
+      { task: 3, placement: "on", line: 2 },
+      { task: 4, placement: "on", line: 3 },
+      { task: 5, placement: "above", callout_offset: { x: 0, y: -16 } },
+    );
+    new TimelineView("tl").parse(data);
+    const task = (id: number) => container.querySelector<HTMLElement>(`.tlv-task[data-task="${id}"]`)!;
+    const arrows = (id: number) => [...task(id).querySelectorAll(".tlv-arrow")].map((a) => a.className);
+
+    expect(task(1).className).toBe("tlv-task");
+    expect(arrows(1)).toEqual([]);
+    expect(task(3).classList.contains("tlv-task--before")).toBe(true);
+    expect(arrows(3)).toEqual(["tlv-arrow tlv-arrow--before"]);
+    expect(task(3).style.left).toBe("0%");
+    // Entirely after the range: a stub at the finish edge.
+    expect(arrows(4)).toEqual(["tlv-arrow tlv-arrow--after"]);
+    expect(task(4).style.left).toBe("calc(100% - 14px)");
+    expect(task(4).classList.contains("tlv-task--outside-after")).toBe(true);
+    // A callout's edge bar gets a pointed end instead.
+    const edge = container.querySelector(".tlv-area--above .tlv-edge-bar")!;
+    expect(edge.className).toBe("tlv-edge-bar tlv-edge-bar--after");
   });
 });
 

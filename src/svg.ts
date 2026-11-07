@@ -128,13 +128,51 @@ class SvgWriter {
   }
 }
 
-/** A rect with only the corners on one side rounded: the outer side of an edge bar. */
-function roundedOneSide(b: Box, radius: number, side: "top" | "bottom"): string {
-  const r = Math.min(radius, b.width / 2, b.height);
+/** A rect path with each corner's radius from the element's computed style, as CSS draws it. */
+function roundedRect(b: Box, style: CSSStyleDeclaration): string {
   const { x, y, width: w, height: h } = b;
-  return side === "top"
-    ? `M${num(x)} ${num(y + h)}V${num(y + r)}A${r} ${r} 0 0 1 ${num(x + r)} ${num(y)}H${num(x + w - r)}A${r} ${r} 0 0 1 ${num(x + w)} ${num(y + r)}V${num(y + h)}Z`
-    : `M${num(x)} ${num(y)}V${num(y + h - r)}A${r} ${r} 0 0 0 ${num(x + r)} ${num(y + h)}H${num(x + w - r)}A${r} ${r} 0 0 0 ${num(x + w)} ${num(y + h - r)}V${num(y)}Z`;
+  const max = Math.min(w, h) / 2;
+  const r = (v: string) => Math.min(parseFloat(v) || 0, max);
+  const [tl, tr, br, bl] = [
+    r(style.borderTopLeftRadius),
+    r(style.borderTopRightRadius),
+    r(style.borderBottomRightRadius),
+    r(style.borderBottomLeftRadius),
+  ];
+  const arc = (radius: number, ex: number, ey: number) =>
+    radius ? `A${num(radius)} ${num(radius)} 0 0 1 ${num(ex)} ${num(ey)}` : `L${num(ex)} ${num(ey)}`;
+  return (
+    `M${num(x + tl)} ${num(y)}H${num(x + w - tr)}${arc(tr, x + w, y + tr)}` +
+    `V${num(y + h - br)}${arc(br, x + w - br, y + h)}` +
+    `H${num(x + bl)}${arc(bl, x, y + h - bl)}` +
+    `V${num(y + tl)}${arc(tl, x + tl, y)}Z`
+  );
+}
+
+/** An edge bar with a pointed end on the side(s) where its task continues past the range. */
+function pointedBar(b: Box, before: boolean, after: boolean): string {
+  const { x, y, width: w, height: h } = b;
+  const tip = Math.min(6, w / 2);
+  const points = [
+    [before ? x + tip : x, y],
+    [after ? x + w - tip : x + w, y],
+    ...(after ? [[x + w, y + h / 2]] : []),
+    [after ? x + w - tip : x + w, y + h],
+    [before ? x + tip : x, y + h],
+    ...(before ? [[x, y + h / 2]] : []),
+  ];
+  return `M${points.map(([px, py]) => `${num(px)} ${num(py)}`).join("L")}Z`;
+}
+
+/** The small arrow inside a task bar that continues past the range. */
+function drawArrow(out: SvgWriter, arrow: HTMLElement): void {
+  const { x, y, width: w, height: h } = out.box(arrow);
+  const points = arrow.classList.contains("tlv-arrow--before")
+    ? [[x + w, y], [x, y + h / 2], [x + w, y + h]]
+    : [[x, y], [x + w, y + h / 2], [x, y + h]];
+  out.add(
+    `<polygon points="${points.map(([px, py]) => `${num(px)},${num(py)}`).join(" ")}" fill="${getComputedStyle(arrow).backgroundColor}"/>`,
+  );
 }
 
 function drawSymbol(out: SvgWriter, el: HTMLElement): void {
@@ -178,10 +216,11 @@ function drawBar(out: SvgWriter, bar: HTMLElement): void {
   for (const task of bar.querySelectorAll<HTMLElement>(".tlv-task")) {
     const tb = out.box(task);
     const ts = getComputedStyle(task);
-    out.rect(tb, ts.backgroundColor, ` rx="${num(parseFloat(ts.borderTopLeftRadius) || 0)}"`);
+    out.add(`<path d="${roundedRect(tb, ts)}" fill="${ts.backgroundColor}"/>`);
     const label = task.querySelector<HTMLElement>(".tlv-task-label")!;
     // A label beside a narrow bar is positioned absolutely and not clipped.
     out.text(label, getComputedStyle(label).position === "absolute" ? undefined : tb);
+    for (const arrow of task.querySelectorAll<HTMLElement>(".tlv-arrow")) drawArrow(out, arrow);
   }
   for (const milestone of bar.querySelectorAll<HTMLElement>(".tlv-milestone")) {
     drawSymbol(out, milestone.querySelector<HTMLElement>(".tlv-symbol")!);
@@ -227,8 +266,11 @@ function drawCalloutArea(out: SvgWriter, area: HTMLElement): void {
 
     if (marker.classList.contains("tlv-edge-bar")) {
       const ms = getComputedStyle(marker);
-      const radius = parseFloat(above ? ms.borderTopLeftRadius : ms.borderBottomLeftRadius) || 0;
-      out.add(`<path d="${roundedOneSide(out.box(marker), radius, above ? "top" : "bottom")}" fill="${ms.backgroundColor}"/>`);
+      const before = marker.classList.contains("tlv-edge-bar--before");
+      const after = marker.classList.contains("tlv-edge-bar--after");
+      const mb = out.box(marker);
+      const d = before || after ? pointedBar(mb, before, after) : roundedRect(mb, ms);
+      out.add(`<path d="${d}" fill="${ms.backgroundColor}"/>`);
     } else {
       drawSymbol(out, marker);
     }

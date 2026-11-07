@@ -24,16 +24,20 @@ export interface ViewData {
   /** Needed when a REST backend is configured. */
   id?: Id;
   name: string;
-  /** ISO 8601: `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm`. */
-  start_date: string;
-  finish_date: string;
+  /**
+   * `false` (default): each timeline's bar fills the full width, scaled to its
+   * own dates. `true`: all timelines share one time axis, from the earliest
+   * start to the latest finish, and each bar is drawn at its offset and width
+   * on it, so the same date lines up across timelines.
+   */
+  absolute?: boolean;
   /** Unit of the time scale. Default: `day`. */
   scale?: Scale;
   /** Side of each timeline the name label is shown on. Default: `left`. */
   name_position?: NamePosition;
   /** Symbol used for milestones. Default: `diamond`. */
   milestone_symbol?: MilestoneSymbol;
-  /** Show the view's start and finish dates, with "Start" and "Finish" captions, beside each bar. Default: `true`. */
+  /** Show each timeline's start and finish dates, with "Start" and "Finish" captions, beside its bar. Default: `true`. */
   show_dates?: boolean;
 }
 
@@ -60,6 +64,9 @@ export interface EntryData {
 export interface TimelineData {
   id: Id;
   name: string;
+  /** The timeline's time range. ISO 8601: `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm`. */
+  start_date: string;
+  finish_date: string;
   entries: EntryData[];
 }
 

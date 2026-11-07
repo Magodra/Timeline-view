@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { formatDate } from "./dates";
-import { MoveError, TimelineModel, lineCount } from "./model";
-import type { TimelineViewData } from "./types";
+import { MoveError, TimelineModel, lineCount, viewRange } from "./model";
+import type { TimelineData, TimelineViewData } from "./types";
 
 function sample(): TimelineViewData {
   return {
-    view: { id: "v1", name: "Example", start_date: "2026-03-01", finish_date: "2026-05-01", scale: "week" },
+    view: { id: "v1", name: "Example", scale: "week" },
     tasks: [
       { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d" },
       { id: 2, text: "Milestone #1", start_date: "2026-04-10" },
@@ -15,13 +15,15 @@ function sample(): TimelineViewData {
       {
         id: 1,
         name: "Project",
+        start_date: "2026-03-01",
+        finish_date: "2026-05-01",
         entries: [
           { task: 1, placement: "on", line: 1 },
           { task: 2, placement: "below", callout_offset: { x: 30, y: 16 } },
           { task: 3, placement: "above", callout_offset: { x: -20, y: -40 } },
         ],
       },
-      { id: 2, name: "Other", entries: [{ task: 1, placement: "above", callout_offset: { x: 0, y: -16 } }] },
+      { id: 2, name: "Other", start_date: "2026-04-01", finish_date: "2026-06-01", entries: [{ task: 1, placement: "above", callout_offset: { x: 0, y: -16 } }] },
     ],
   };
 }
@@ -43,7 +45,7 @@ describe("fromData", () => {
   it("round-trips through toData", () => {
     const data = sample();
     const out = TimelineModel.fromData(data).toData();
-    expect(out.view.finish_date).toBe("2026-05-01");
+    expect(out.view.absolute).toBe(false);
     expect(out.timelines).toEqual(data.timelines);
     // finish_date is derived, so it is not written back for tasks.
     expect(out.tasks).toEqual(data.tasks);
@@ -58,6 +60,14 @@ describe("fromData", () => {
     expect(entry(m, 1, 3)!.callout_offset).toEqual({ x: 0, y: -16 });
   });
 
+  it("gives each timeline its own range, and the view a range covering them all", () => {
+    const m = TimelineModel.fromData(sample());
+    expect(formatDate(m.findTimeline(1)!.start)).toBe("2026-03-01");
+    expect(formatDate(m.findTimeline(2)!.finish)).toBe("2026-06-01");
+    const range = viewRange(m)!;
+    expect([formatDate(range.start), formatDate(range.finish)]).toEqual(["2026-03-01", "2026-06-01"]);
+  });
+
   it("calculates the number of bar lines from the entries, at least 1", () => {
     const data = sample();
     expect(lineCount(TimelineModel.fromData(data).findTimeline(1)!)).toBe(2);
@@ -68,8 +78,10 @@ describe("fromData", () => {
 
   it("rejects invalid data", () => {
     const cases: Array<(d: TimelineViewData) => void> = [
-      (d) => (d.view.start_date = "01-03-2026"),
-      (d) => (d.view.finish_date = "2026-02-01"),
+      (d) => (d.timelines[0].start_date = "01-03-2026"),
+      (d) => (d.timelines[0].finish_date = "2026-02-01"),
+      (d) => delete (d.timelines[1] as Partial<TimelineData>).finish_date,
+      (d) => ((d.view as { absolute?: unknown }).absolute = "yes"),
       (d) => (d.tasks[1].id = 1),
       (d) => (d.tasks[0].duration = "2 days"),
       (d) => (d.timelines[0].entries[0].task = 99),

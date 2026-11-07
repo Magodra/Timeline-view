@@ -16,7 +16,7 @@
     <script>
         timeline.init("timeline_here");
         timeline.parse({
-            view: { name: "Release plan", start_date: "2026-01-01", finish_date: "2026-07-01", scale: "month" },
+            view: { name: "Release plan", scale: "month" },
             tasks: [
                 { id: 1, text: "Design", start_date: "2026-01-05", duration: "6w" },
                 { id: 2, text: "Build", start_date: "2026-02-16", duration: "3m" },
@@ -26,13 +26,13 @@
                 { id: 6, text: "Security audit", start_date: "2026-05-04", duration: "2w" }
             ],
             timelines: [
-                { id: "dev", name: "Development", entries: [
+                { id: "dev", name: "Development", start_date: "2026-01-01", finish_date: "2026-07-01", entries: [
                     { task: 1, placement: "on", line: 0 },
                     { task: 2, placement: "on", line: 1 },
                     { task: 3, placement: "above", callout_offset: { x: 0, y: -16 } },
                     { task: 4, placement: "below", callout_offset: { x: 20, y: 24 } }
                 ]},
-                { id: "ops", name: "Operations", entries: [
+                { id: "ops", name: "Operations", start_date: "2026-01-01", finish_date: "2026-07-01", entries: [
                     { task: 5, placement: "on", line: 0 },
                     { task: 6, placement: "above", callout_offset: { x: -50, y: -24 } }
                 ]}
