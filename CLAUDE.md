@@ -104,7 +104,7 @@ Duration format: a whole number plus a unit: `h` (hours), `d` (days), `w` (weeks
 
   The bar has two parts:
   - **Time scale:** `hour`, `day`, `week` (ISO weeks, starting Monday), `month` or `year` ticks (`view.scale`). The periods between ticks alternate between a light and a darker background; the shading follows the calendar period, so it matches across timelines.
-  - **Task lines:** tasks are drawn as bars covering their time span, clipped to the timeline's range. A task that starts before the range or finishes after it gets a square end and a small arrow pointing out on that side; one entirely outside the range is a short stub at the nearest edge. A bar too narrow for its label shows the label beside it. Milestones outside the range are drawn at the nearest edge, without an arrow. Milestones are drawn as a symbol: `diamond` (default), `circle`, `square`, `triangle` or `star`, set by `view.milestone_symbol` or per task with `symbol`. No divider lines are drawn between task lines.
+  - **Task lines:** tasks are drawn as bars covering their time span, clipped to the timeline's range. A task that starts before the range or finishes after it gets a square end and a small arrow pointing out on that side; one entirely outside the range is a short stub at the nearest edge. A bar too narrow for its label shows the label beside it. Milestones outside the range are drawn at the nearest edge, without an arrow. Milestones are drawn as a symbol: `diamond` (default), `circle`, `square`, `triangle` or `star`, set by `view.milestone_symbol` or per task with `symbol`. A task's `color` (any CSS color) overrides the theme's `--tlv-task` or `--tlv-milestone` for that task's bar, symbol and callout edge marker; render.ts sets the variable on the element, so the drag ghost and the SVG export follow. No divider lines are drawn between task lines.
 - **Start and finish dates:** the timeline's `start_date` is shown left of its bar under a right-aligned "Start" caption, and its `finish_date` right of the bar under a left-aligned "Finish" caption. `view.show_dates: false` hides both, and the bar then uses the full width.
 - **Callouts:** entries placed `above` or `below` show the task's name, `start_date` and `finish_date`, centered, in a label. On the bar's edge (top when above, bottom when below) each callout has a marker:
   - a milestone: its symbol (default diamond), centered on the edge at its date;
@@ -146,7 +146,7 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
     show_dates: true                   // default true: Start/Finish dates beside each bar
   },
   tasks: [
-    { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d" },   // finishes 2026-04-03
+    { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d", color: "#0a7f5a" },   // finishes 2026-04-03; own color
     { id: 2, text: "Milestone #1", start_date: "2026-04-10", symbol: "star" }   // no duration → milestone
   ],
   timelines: [
@@ -158,7 +158,7 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
 }
 ```
 
-`parse()` throws on invalid data: a timeline without `start_date` or `finish_date`, or finishing before it starts; bad dates or durations, duplicate task ids, entries for unknown tasks, a task twice on one timeline, a negative or fractional `line`, an entry with both `line` and `callout_offset`, or a `callout_offset` without numeric `x` and `y`.
+`parse()` throws on invalid data: a task `color` that isn't a CSS color; a timeline without `start_date` or `finish_date`, or finishing before it starts; bad dates or durations, duplicate task ids, entries for unknown tasks, a task twice on one timeline, a negative or fractional `line`, an entry with both `line` and `callout_offset`, or a `callout_offset` without numeric `x` and `y`.
 
 ## JavaScript API
 

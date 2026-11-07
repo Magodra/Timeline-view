@@ -13,7 +13,8 @@
     <p>
         Several timelines, a month scale, month and year durations, milestone symbols,
         names on the right, and callout labels at different heights above and below the bar.
-        "Support" runs past the timeline's finish, so its bar ends in an arrow.
+        "Support" runs past the timeline's finish, so its bar ends in an arrow. "Support",
+        "Launch" and "Security audit" have their own <code>color</code>.
     </p>
     <div id="timeline_here"></div>
 
@@ -35,10 +36,10 @@
                 { id: "design", text: "Design", start_date: "2026-01-15", duration: "3m" },
                 { id: "build", text: "Build", start_date: "2026-04-01", duration: "8m" },
                 { id: "beta", text: "Beta", start_date: "2026-09-01", symbol: "triangle" },
-                { id: "launch", text: "Launch", start_date: "2026-12-01", symbol: "star" },
-                { id: "support", text: "Support", start_date: "2026-12-01", duration: "1y" },
+                { id: "launch", text: "Launch", start_date: "2026-12-01", symbol: "star", color: "#bf8700" },
+                { id: "support", text: "Support", start_date: "2026-12-01", duration: "1y", color: "#1a7f37" },
                 { id: "review", text: "Design review", start_date: "2026-04-15", symbol: "circle" },
-                { id: "audit", text: "Security audit", start_date: "2026-10-01", duration: "3w" },
+                { id: "audit", text: "Security audit", start_date: "2026-10-01", duration: "3w", color: "#8250df" },
                 { id: "kickoff", text: "Kick-off", start_date: "2026-01-12", symbol: "square" }
             ],
             timelines: [

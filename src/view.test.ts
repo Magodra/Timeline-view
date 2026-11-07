@@ -127,6 +127,22 @@ describe("rendering", () => {
     expect(Number(callout.dataset.at)).toBeCloseTo(32 / 61, 6);
   });
 
+  it("draws a task in its own color, on the bar and as a callout marker", () => {
+    const data = sample();
+    data.tasks[0].color = "rebeccapurple";
+    data.tasks[1].color = "#0a7f5a";
+    data.tasks.push({ id: 3, text: "Callout task", start_date: "2026-03-10", duration: "1w", color: "orange" });
+    data.timelines[0].entries.push({ task: 3, callout_offset: { x: 0, y: -16 } });
+    new TimelineView("tl").parse(data);
+    const prop = (selector: string, name: string) =>
+      container.querySelector<HTMLElement>(selector)!.style.getPropertyValue(name);
+
+    expect(prop('.tlv-task[data-task="1"]', "--tlv-task")).toBe("rebeccapurple");
+    // Task 2 is a milestone callout: its edge symbol uses --tlv-milestone.
+    expect(prop(".tlv-area--below .tlv-edge-symbol", "--tlv-milestone")).toBe("#0a7f5a");
+    expect(prop(".tlv-area--above .tlv-edge-bar", "--tlv-task")).toBe("orange");
+  });
+
   it("draws milestones on the bar with the configured symbol", () => {
     const data = sample();
     data.timelines[0].entries[1] = { task: 2, line: 0 };

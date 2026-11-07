@@ -39,7 +39,7 @@ An entry can't have both `line` and `callout_offset`. One task can appear on sev
     show_dates: true                  // show Start and Finish dates beside each bar (default true)
   },
   tasks: [
-    { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d" },
+    { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d", color: "#0a7f5a" },  // own color
     { id: 2, text: "Milestone #1", start_date: "2026-04-10", symbol: "star" }
   ],
   timelines: [
@@ -202,3 +202,12 @@ Override the custom properties on `.tlv`:
 ```
 
 See [src/styles.css](../src/styles.css) for the full list. The component follows the system's light or dark mode.
+
+To color a single task, give it a `color` in the data: any CSS color, such as `"#0a7f5a"`, `"rgb(10 127 90)"` or `"orange"`. It replaces `--tlv-task` for a bar, or `--tlv-milestone` for a milestone, on that task's bar or symbol and on its callout's edge marker. It is the same in light and dark mode, and a bar's label stays in `--tlv-task-text` (white by default), so pick a color the label reads well on.
+
+```js
+tasks: [
+  { id: "support", text: "Support", start_date: "2026-12-01", duration: "1y", color: "#1a7f37" },
+  { id: "launch", text: "Launch", start_date: "2026-12-01", symbol: "star", color: "#bf8700" }
+]
+```

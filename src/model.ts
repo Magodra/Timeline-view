@@ -35,6 +35,8 @@ export interface Task {
   duration?: string;
   isMilestone: boolean;
   symbol?: MilestoneSymbol;
+  /** CSS color overriding the theme's task or milestone color. */
+  color?: string;
 }
 
 export type Entry =
@@ -339,10 +341,23 @@ export function lineCount(timeline: Timeline): number {
   return count;
 }
 
+/**
+ * Whether `value` is a CSS color. Uses the browser's own check where there is
+ * one; elsewhere (a JavaScript backend) accepts any non-empty string without
+ * characters that could end a CSS value.
+ */
+function isColor(value: string): boolean {
+  if (typeof CSS !== "undefined" && typeof CSS.supports === "function") return CSS.supports("color", value);
+  return value.trim() !== "" && !/[;{}]/.test(value);
+}
+
 function taskFromData(t: TaskData): Task {
   if (t.id === undefined || t.id === null) throw new Error("Every task needs an id");
   const start = parseDate(t.start_date);
   const isMilestone = isMilestoneDuration(t.duration);
+  if (t.color !== undefined && (typeof t.color !== "string" || !isColor(t.color))) {
+    throw new Error(`Task ${t.id}: color must be a CSS color`);
+  }
   return {
     id: t.id,
     text: t.text ?? "",
@@ -351,6 +366,7 @@ function taskFromData(t: TaskData): Task {
     duration: t.duration,
     isMilestone,
     symbol: t.symbol,
+    color: t.color,
   };
 }
 
@@ -361,6 +377,7 @@ function taskToData(t: Task): TaskData {
     start_date: formatDate(t.start),
     ...(t.duration !== undefined && { duration: t.duration }),
     ...(t.symbol !== undefined && { symbol: t.symbol }),
+    ...(t.color !== undefined && { color: t.color }),
   };
 }
 

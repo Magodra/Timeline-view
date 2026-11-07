@@ -52,6 +52,12 @@ export interface TaskData {
   duration?: string;
   /** Overrides the view's `milestone_symbol` for this task. */
   symbol?: MilestoneSymbol;
+  /**
+   * Any CSS color, such as `"#0a7f5a"` or `"rebeccapurple"`. Overrides the
+   * theme's `--tlv-task` (bars) or `--tlv-milestone` (symbols) for this task,
+   * on the bar and on its callout's edge marker.
+   */
+  color?: string;
 }
 
 /**

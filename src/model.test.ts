@@ -51,6 +51,14 @@ describe("fromData", () => {
     expect(out.tasks).toEqual(data.tasks);
   });
 
+  it("keeps a task's color", () => {
+    const data = sample();
+    data.tasks[0].color = "#0a7f5a";
+    const out = TimelineModel.fromData(data).toData();
+    expect(out.tasks[0].color).toBe("#0a7f5a");
+    expect(out.tasks[1]).not.toHaveProperty("color");
+  });
+
   it("derives the area from the entry: callout_offset.y picks the side, no offset means the bar", () => {
     const data = sample();
     data.timelines[0].entries.push({ task: 4 }, { task: 5, callout_offset: { x: 3, y: 0 } });
@@ -90,6 +98,8 @@ describe("fromData", () => {
       (d) => ((d.view as { absolute?: unknown }).absolute = "yes"),
       (d) => (d.tasks[1].id = 1),
       (d) => (d.tasks[0].duration = "2 days"),
+      (d) => (d.tasks[0].color = "red; display: none"),
+      (d) => (d.tasks[0].color = 5 as never),
       (d) => (d.timelines[0].entries[0].task = 99),
       (d) => d.timelines[0].entries.push({ task: 1 }),
       (d) => (d.timelines[0].entries[0].callout_offset = { x: 1, y: 1 }),

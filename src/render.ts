@@ -79,6 +79,14 @@ function placeSpan(node: HTMLElement, base: string, from: number, to: number): v
   }
 }
 
+/**
+ * A task's own color: sets the theme variable the element is drawn with, so
+ * the drag ghost (a copy of the element) and the SVG export follow it too.
+ */
+function applyColor(node: HTMLElement, task: Task): void {
+  if (task.color) node.style.setProperty(task.isMilestone ? "--tlv-milestone" : "--tlv-task", task.color);
+}
+
 /** Marks a task that continues past its timeline's start or finish. */
 function continuation(node: HTMLElement, base: string, before: boolean, after: boolean): void {
   node.classList.toggle(`${base}--before`, before);
@@ -198,6 +206,7 @@ function renderOnEntry(model: TimelineModel, timeline: Timeline, entry: Entry): 
     const node = entryElement("tlv-milestone", timeline, entry, center);
     node.style.left = pct(from);
     node.title = title;
+    applyColor(node, task);
     node.append(
       el("span", `tlv-symbol tlv-symbol--${task.symbol ?? model.view.milestoneSymbol}`),
       el("span", "tlv-milestone-label", task.text),
@@ -208,6 +217,7 @@ function renderOnEntry(model: TimelineModel, timeline: Timeline, entry: Entry): 
   const node = entryElement("tlv-task", timeline, entry, center);
   placeSpan(node, "tlv-task", from, to);
   node.title = title;
+  applyColor(node, task);
   // The stylesheet moves the label beside the bar when the bar is too narrow for it.
   node.append(el("span", "tlv-task-label", task.text));
   // A task that continues past the timeline's start or finish gets an arrow at that end.
@@ -247,6 +257,7 @@ function renderCalloutArea(model: TimelineModel, timeline: Timeline, placement: 
       continuation(marker, "tlv-edge-bar", before, after);
       reach = EDGE_BAR_HEIGHT;
     }
+    applyColor(marker, task);
 
     const connector = el("div", "tlv-connector");
     connector.style.left = pct(center);
