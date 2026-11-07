@@ -160,6 +160,29 @@ Text in the SVG uses the page's fonts by name, so on a computer without those fo
 
 ## Events
 
+### Clicks
+
+`attachEvent` subscribes to user actions on the view. It returns an event id; pass it to `detachEvent` to remove the handler.
+
+```js
+const eventId = timeline.attachEvent("onTaskClick", function (id, e, timelineId) {
+  alert(`You've just clicked an item with id=${id}`);
+  // `this` is the timeline view: this.serialize(), this.parse(...), this.toSVG(), ...
+});
+
+timeline.detachEvent(eventId); // returns false if the id is unknown
+```
+
+| Event | Handler | When |
+|-------|---------|------|
+| `onTaskClick` | `(id, e, timelineId)` | A task bar, milestone or callout label is clicked: pressed and released without dragging. `id` is the task's id, `e` the browser's pointer event, `timelineId` the timeline it was clicked on (a task can be on several). |
+
+Write the handler as a `function` to use `this`: an arrow function (`(id) => ...`) keeps the `this` of the code around it. In the script-tag setup, `this` is the default view, with the same methods as the global `timeline`.
+
+Dragging an item never counts as a click.
+
+### Moves
+
 ```js
 const off = timeline.on("entry_moved", (e) => { /* e.timeline_id, e.task_id, e.patch */ });
 timeline.on("move_failed", (e) => { /* e.error; the view already shows the restored state */ });

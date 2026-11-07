@@ -10,8 +10,12 @@
 </head>
 <body>
     <h1>Basic timeline</h1>
-    <p>Drag the task bar between lines, or drag the milestone label anywhere above or below the bar. The label areas grow to fit.</p>
-    <p class="controls"><label><input type="checkbox" id="show_dates" checked> Show start and finish dates</label></p>
+    <p>Drag the task bar between lines, or drag the milestone label anywhere above or below the bar. The label areas grow to fit. Click a task or label to see the click event.</p>
+    <p class="controls">
+        <label><input type="checkbox" id="show_dates" checked> Show start and finish dates</label>
+        <label><input type="checkbox" id="click_events" checked> Report clicks</label>
+        <span id="clicked">Nothing clicked yet.</span>
+    </p>
     <div id="timeline_here" style="width: 1000px; max-width: 100%;"></div>
     <script>
         timeline.init("timeline_here");
@@ -35,6 +39,22 @@
             ]
         });
         timeline.on("entry_moved", (e) => console.log("entry_moved", e));
+
+        // Click events. Inside a `function` handler, `this` is the timeline view.
+        // attachEvent returns an id; detachEvent(id) removes the handler again.
+        const showClick = function (id, e) {
+            const task = this.serialize().tasks.find((t) => t.id === id);
+            document.getElementById("clicked").textContent = `You've just clicked "${task.text}" (id=${id}).`;
+        };
+        let clickEventId = timeline.attachEvent("onTaskClick", showClick);
+        document.getElementById("click_events").addEventListener("change", (e) => {
+            if (e.target.checked) {
+                clickEventId = timeline.attachEvent("onTaskClick", showClick);
+            } else {
+                timeline.detachEvent(clickEventId);
+                document.getElementById("clicked").textContent = "Clicks are not reported.";
+            }
+        });
     </script>
 </body>
 </html>

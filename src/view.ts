@@ -31,6 +31,24 @@ export interface TimelineEvents {
 
 type Handler<T> = (event: T) => void;
 
+/**
+ * Handlers for `attachEvent`. Inside a handler written as a `function`, `this`
+ * is the TimelineView, with the same methods as the global `timeline`.
+ */
+export interface TimelineHandlers {
+  /**
+   * A task bar, milestone or callout label was clicked (pressed and released
+   * without dragging). `id` is the task's id; `timelineId` the timeline it was
+   * clicked on, since a task can appear on several.
+   */
+  onTaskClick: (this: TimelineView, id: Id, e: MouseEvent, timelineId: Id) => void;
+}
+
+export type TimelineEventName = keyof TimelineHandlers;
+
+/** The event names `attachEvent` accepts. */
+const HANDLER_NAMES: readonly TimelineEventName[] = ["onTaskClick"];
+
 /** Thrown for moves queued behind one that failed; their changes were rolled back with it. */
 export class MoveCancelledError extends Error {
   constructor() {
@@ -47,6 +65,9 @@ export class TimelineView {
   private model?: TimelineModel;
   private readonly api?: RestClient;
   private readonly listeners = new Map<keyof TimelineEvents, Set<Handler<never>>>();
+  /** `attachEvent` handlers by event id. */
+  private readonly handlers = new Map<number, { name: TimelineEventName; handler: TimelineHandlers[TimelineEventName] }>();
+  private lastEventId = 0;
   private readonly detachDrag: () => void;
   /** REST requests run one at a time, in the order the moves were made. */
   private queue: Promise<unknown> = Promise.resolve();
@@ -59,7 +80,11 @@ export class TimelineView {
     if (!node) throw new Error(`Timeline container "${container}" not found`);
     this.container = node;
     if (options.api_url) this.api = new RestClient(options.api_url, options.fetch);
-    this.detachDrag = attachDrag(node, (e) => this.onDrop(e));
+    this.detachDrag = attachDrag(
+      node,
+      (e) => this.onDrop(e),
+      (entry, e) => this.onEntryClick(entry, e),
+    );
   }
 
   /** Loads data in the public format and renders it. */
@@ -94,6 +119,23 @@ export class TimelineView {
     if (!set) this.listeners.set(name, (set = new Set()));
     set.add(handler as Handler<never>);
     return () => set.delete(handler as Handler<never>);
+  }
+
+  /**
+   * Subscribes to an event, such as `onTaskClick`. Returns an event id for
+   * `detachEvent`. Inside a `function` handler, `this` is this view.
+   */
+  attachEvent<K extends TimelineEventName>(name: K, handler: TimelineHandlers[K]): number {
+    if (!HANDLER_NAMES.includes(name)) throw new Error(`Unknown event "${name}"`);
+    if (typeof handler !== "function") throw new Error("attachEvent needs a handler function");
+    const id = ++this.lastEventId;
+    this.handlers.set(id, { name, handler });
+    return id;
+  }
+
+  /** Removes a handler added with `attachEvent`. Returns false if the id is unknown. */
+  detachEvent(eventId: number): boolean {
+    return this.handlers.delete(eventId);
   }
 
   /**
@@ -159,6 +201,7 @@ export class TimelineView {
   destroy(): void {
     this.detachDrag();
     this.listeners.clear();
+    this.handlers.clear();
     this.container.replaceChildren();
     this.container.classList.remove("tlv");
   }
@@ -197,6 +240,22 @@ export class TimelineView {
 
     // Failures are reported through `move_failed`.
     this.moveEntry(source.id, entry.taskId, patch).catch(() => undefined);
+  }
+
+  /** Calls every `attachEvent` handler for `name`, with this view as `this`. */
+  private callHandlers<K extends TimelineEventName>(name: K, ...args: Parameters<TimelineHandlers[K]>): void {
+    // Copied, so a handler may detach itself (or others) while running.
+    for (const { name: n, handler } of [...this.handlers.values()]) {
+      if (n === name) (handler as (this: TimelineView, ...a: Parameters<TimelineHandlers[K]>) => void).apply(this, args);
+    }
+  }
+
+  private onEntryClick(entry: HTMLElement, e: MouseEvent): void {
+    const model = this.model;
+    // The DOM holds ids as strings; hand out the task's and timeline's own ids.
+    const task = model?.tasks.find((t) => String(t.id) === entry.dataset.task);
+    const timeline = model?.timelines.find((t) => String(t.id) === entry.dataset.timeline);
+    if (task && timeline) this.callHandlers("onTaskClick", task.id, e, timeline.id);
   }
 
   private emit<K extends keyof TimelineEvents>(name: K, event: TimelineEvents[K]): void {

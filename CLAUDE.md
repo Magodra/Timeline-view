@@ -170,7 +170,9 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
 | `timeline.serialize()` | Returns the current data. |
 | `timeline.toSVG()` | Returns the view as a standalone SVG document (a string), as it looks on screen. The view must be rendered and visible. Saving it is up to the host page; see [examples/export.html](examples/export.html). |
 | `timeline.moveEntry(timeline_id, task_id, patch)` | Moves an entry, as a drop does. Takes the PATCH body below, without `version`. |
-| `timeline.on("entry_moved" \| "move_failed", handler)` | Subscribes to events. Returns an unsubscribe function. |
+| `timeline.on("entry_moved" \| "move_failed", handler)` | Subscribes to move events. Returns an unsubscribe function. |
+| `timeline.attachEvent("onTaskClick", handler)` | Subscribes to a user event; returns an event id. `onTaskClick` gets `(task_id, event, timeline_id)` when a task bar, milestone or callout is clicked without dragging. Inside a `function` handler, `this` is the view. |
+| `timeline.detachEvent(event_id)` | Removes a handler added with `attachEvent`. Returns `false` for an unknown id. |
 | `new timeline.TimelineView(container, options)` | Separate instance, for more than one view on a page. Same methods. |
 
 ## REST API

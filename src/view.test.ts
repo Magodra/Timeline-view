@@ -234,6 +234,70 @@ describe("toSVG", () => {
   });
 });
 
+describe("attachEvent", () => {
+  // jsdom may lack PointerEvent; a MouseEvent with the pointer event's type works the same here.
+  const Pointer = (globalThis.PointerEvent ?? MouseEvent) as typeof MouseEvent;
+  const press = (node: Element, type: string, x: number, y = 0, target: EventTarget = node) =>
+    target.dispatchEvent(new Pointer(type, { bubbles: true, button: 0, clientX: x, clientY: y }));
+  const click = (node: Element) => {
+    press(node, "pointerdown", 10);
+    press(node, "pointerup", 11, 0, window);
+  };
+
+  it("calls onTaskClick with the task id, the event and the timeline id, with the view as this", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const calls: unknown[][] = [];
+    let self: unknown;
+    view.attachEvent("onTaskClick", function (id, e, timelineId) {
+      self = this;
+      calls.push([id, e.type, timelineId]);
+    });
+
+    click(container.querySelector('.tlv-task[data-task="1"]')!);
+    click(container.querySelector('.tlv-callout[data-task="2"]')!);
+    // The ids keep their type (numbers here), not the DOM's strings.
+    expect(calls).toEqual([
+      [1, "pointerup", 1],
+      [2, "pointerup", 1],
+    ]);
+    expect(self).toBe(view);
+  });
+
+  it("returns an event id that detachEvent removes", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const handler = vi.fn();
+    const first = view.attachEvent("onTaskClick", handler);
+    const second = view.attachEvent("onTaskClick", handler);
+    expect(second).not.toBe(first);
+
+    expect(view.detachEvent(first)).toBe(true);
+    expect(view.detachEvent(first)).toBe(false);
+    click(container.querySelector(".tlv-task")!);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report a drag as a click", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const handler = vi.fn();
+    view.attachEvent("onTaskClick", handler);
+    // jsdom has no layout: nothing is under the pointer, so the drop goes nowhere.
+    document.elementFromPoint = () => null;
+    const task = container.querySelector(".tlv-task")!;
+    press(task, "pointerdown", 10);
+    press(task, "pointermove", 60, 0, window);
+    press(task, "pointerup", 60, 0, window);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown event names", () => {
+    const view = new TimelineView("tl");
+    expect(() => view.attachEvent("onNothing" as never, (() => undefined) as never)).toThrow(/Unknown event/);
+  });
+});
+
 describe("moveEntry without a backend", () => {
   it("applies the move, re-renders and fires entry_moved", async () => {
     const view = new TimelineView("tl");

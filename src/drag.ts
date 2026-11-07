@@ -68,8 +68,17 @@ function targetOf(node: HTMLElement): DropTarget {
   return { timeline, placement, line: Number(node.dataset.line), newLine: node.dataset.newLine === "true" };
 }
 
-/** Makes every `[data-entry]` inside `root` draggable. Returns a function that detaches. */
-export function attachDrag(root: HTMLElement, onDrop: (event: DropEvent) => void): () => void {
+/**
+ * Makes every `[data-entry]` inside `root` draggable. A press and release
+ * without moving past the drag threshold is a click instead, reported to
+ * `onClick` with the entry's element; a drag never reports a click.
+ * Returns a function that detaches.
+ */
+export function attachDrag(
+  root: HTMLElement,
+  onDrop: (event: DropEvent) => void,
+  onClick?: (entry: HTMLElement, event: PointerEvent) => void,
+): () => void {
   let cleanup: (() => void) | undefined;
 
   const onPointerDown = (down: PointerEvent) => {
@@ -110,7 +119,13 @@ export function attachDrag(root: HTMLElement, onDrop: (event: DropEvent) => void
     const finish = (up?: PointerEvent) => {
       const node = up && ghost ? targetElementAt(root, up.clientX, up.clientY) : null;
       const box = ghost?.getBoundingClientRect();
+      const wasDrag = ghost !== undefined;
       cleanup?.();
+      // Released without moving past the drag threshold: a click.
+      if (up && !wasDrag) {
+        onClick?.(source, up);
+        return;
+      }
       if (!node || !box || !up) return;
 
       const target = targetOf(node);

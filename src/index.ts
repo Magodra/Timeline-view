@@ -1,6 +1,12 @@
 import "./styles.css";
 import type { Id, MovePatchData, TimelineViewData } from "./types";
-import { TimelineView, type TimelineEvents, type TimelineOptions } from "./view";
+import {
+  TimelineView,
+  type TimelineEventName,
+  type TimelineEvents,
+  type TimelineHandlers,
+  type TimelineOptions,
+} from "./view";
 
 export * from "./types";
 export { ApiError, RestClient } from "./api";
@@ -13,6 +19,8 @@ export {
   type EntryMovedEvent,
   type MoveFailedEvent,
   type TimelineEvents,
+  type TimelineEventName,
+  type TimelineHandlers,
   type TimelineOptions,
 } from "./view";
 
@@ -39,5 +47,8 @@ export const serialize = () => instance().serialize();
 export const toSVG = () => instance().toSVG();
 export const moveEntry = (timelineId: Id, taskId: Id, patch: MovePatchData) =>
   instance().moveEntry(timelineId, taskId, patch);
+export const attachEvent = <K extends TimelineEventName>(name: K, handler: TimelineHandlers[K]) =>
+  instance().attachEvent(name, handler);
+export const detachEvent = (eventId: number) => instance().detachEvent(eventId);
 export const on = <K extends keyof TimelineEvents>(name: K, handler: (event: TimelineEvents[K]) => void) =>
   instance().on(name, handler);
