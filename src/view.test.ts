@@ -221,6 +221,38 @@ describe("timeline ranges", () => {
   });
 });
 
+describe("moving timelines", () => {
+  const three = (): TimelineViewData => {
+    const data = sample();
+    data.timelines.push(
+      { id: 2, name: "Two", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] },
+      { id: 3, name: "Three", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] },
+    );
+    return data;
+  };
+  const order = () => [...container.querySelectorAll<HTMLElement>(".tlv-timeline")].map((n) => n.dataset.timeline);
+
+  it("moves a timeline up and down the stack, keeping its selection", () => {
+    const view = new TimelineView("tl");
+    view.parse(three());
+    view.selectTimeline(2);
+    expect(view.moveTimelineUp(2)).toBe(true);
+    expect(order()).toEqual(["2", "1", "3"]);
+    expect(view.moveTimelineUp(2)).toBe(false);
+    expect(view.moveTimelineDown(1)).toBe(true);
+    expect(view.moveTimelineDown(1)).toBe(false);
+    expect(order()).toEqual(["2", "3", "1"]);
+    expect(view.serialize().timelines.map((t) => t.id)).toEqual([2, 3, 1]);
+    expect(container.querySelector(".tlv-timeline--selected")!.getAttribute("data-timeline")).toBe("2");
+  });
+
+  it("throws for an unknown timeline", () => {
+    const view = new TimelineView("tl");
+    view.parse(three());
+    expect(() => view.moveTimelineUp(9)).toThrow(/not found/);
+  });
+});
+
 describe("toSVG", () => {
   it("exports the view as a standalone SVG document", () => {
     const view = new TimelineView("tl");
@@ -253,11 +285,11 @@ describe("toSVG", () => {
 describe("attachEvent", () => {
   // jsdom may lack PointerEvent; a MouseEvent with the pointer event's type works the same here.
   const Pointer = (globalThis.PointerEvent ?? MouseEvent) as typeof MouseEvent;
-  const press = (node: Element, type: string, x: number, y = 0, target: EventTarget = node) =>
-    target.dispatchEvent(new Pointer(type, { bubbles: true, button: 0, clientX: x, clientY: y }));
-  const click = (node: Element) => {
-    press(node, "pointerdown", 10);
-    press(node, "pointerup", 11, 0, window);
+  const press = (node: Element, type: string, x: number, y = 0, target: EventTarget = node, ctrlKey = false) =>
+    target.dispatchEvent(new Pointer(type, { bubbles: true, button: 0, clientX: x, clientY: y, ctrlKey }));
+  const click = (node: Element, ctrlKey = false) => {
+    press(node, "pointerdown", 10, 0, node, ctrlKey);
+    press(node, "pointerup", 11, 0, window, ctrlKey);
   };
 
   it("calls onTaskClick with the task id, the event and the timeline id, with the view as this", () => {
@@ -306,6 +338,112 @@ describe("attachEvent", () => {
     press(task, "pointermove", 60, 0, window);
     press(task, "pointerup", 60, 0, window);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  const taskNode = (id: number) => container.querySelector<HTMLElement>(`.tlv-task[data-task="${id}"], .tlv-callout[data-task="${id}"]`)!;
+  const isHighlighted = (id: number) => taskNode(id).classList.contains("tlv-selected");
+  const rowSelected = () => container.querySelector(".tlv-timeline")!.classList.contains("tlv-timeline--selected");
+
+  it("selects a clicked task, highlights it, and clicking it again deselects it", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const events: unknown[][] = [];
+    view.attachEvent("onTaskSelected", (ids) => events.push(["tasks", ids]));
+    view.attachEvent("onTimelineSelected", (ids) => events.push(["timelines", ids]));
+
+    click(taskNode(1));
+    expect(events).toEqual([["tasks", [1]]]);
+    expect(view.getSelectedTasks()).toEqual([1]);
+    expect(view.getSelectedTimelines()).toEqual([]);
+    expect(isHighlighted(1)).toBe(true);
+    // Only one kind at a time: the task's timeline is not selected.
+    expect(rowSelected()).toBe(false);
+
+    // A plain click on another task selects only that one.
+    click(taskNode(2));
+    expect(view.getSelectedTasks()).toEqual([2]);
+    expect(isHighlighted(1)).toBe(false);
+
+    // Clicking the selected task again deselects it.
+    click(taskNode(2));
+    expect(view.getSelectedTasks()).toEqual([]);
+    expect(events.at(-1)).toEqual(["tasks", []]);
+  });
+
+  it("adds and removes items with Ctrl+Click", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    click(taskNode(1));
+    click(taskNode(2), true);
+    expect(view.getSelectedTasks()).toEqual([1, 2]);
+    expect(isHighlighted(1) && isHighlighted(2)).toBe(true);
+
+    click(taskNode(1), true);
+    expect(view.getSelectedTasks()).toEqual([2]);
+    expect(isHighlighted(1)).toBe(false);
+
+    // A plain click on a selected task clears the whole selection.
+    click(taskNode(1), true);
+    click(taskNode(2));
+    expect(view.getSelectedTasks()).toEqual([]);
+
+    // The selection survives a re-render.
+    view.selectTask(1);
+    view.selectTask(2, true);
+    view.parse(view.serialize());
+    expect(isHighlighted(1) && isHighlighted(2)).toBe(true);
+  });
+
+  it("switches between tasks and timelines: selecting one kind deselects the other", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const events: unknown[][] = [];
+    view.attachEvent("onTaskSelected", (ids) => events.push(["tasks", ids]));
+    view.attachEvent("onTimelineSelected", (ids) => events.push(["timelines", ids]));
+    const clicks: unknown[] = [];
+    view.attachEvent("onTimelineClick", function (id) {
+      clicks.push([id, this === view]);
+    });
+
+    click(taskNode(1));
+    click(taskNode(2), true);
+    // Even with Ctrl, a timeline starts a new selection.
+    click(container.querySelector(".tlv-name")!, true);
+    expect(clicks).toEqual([[1, true]]);
+    expect(view.getSelectedTasks()).toEqual([]);
+    expect(view.getSelectedTimelines()).toEqual([1]);
+    expect(container.querySelector(".tlv-selected")).toBeNull();
+    expect(rowSelected()).toBe(true);
+    expect(events.slice(-2)).toEqual([
+      ["tasks", []],
+      ["timelines", [1]],
+    ]);
+
+    // Clicking the selected timeline again deselects it.
+    click(container.querySelector(".tlv-name")!);
+    expect(view.getSelectedTimelines()).toEqual([]);
+    expect(rowSelected()).toBe(false);
+
+    // The view's heading clears the selection.
+    view.selectTimeline(1);
+    click(container.querySelector(".tlv-title")!);
+    expect(view.getSelectedTimelines()).toEqual([]);
+  });
+
+  it("does not select with view.selection: false", () => {
+    const data = sample();
+    data.view.selection = false;
+    const view = new TimelineView("tl");
+    view.parse(data);
+    const selected = vi.fn();
+    view.attachEvent("onTaskSelected", selected);
+    const clicked = vi.fn();
+    view.attachEvent("onTaskClick", clicked);
+    click(taskNode(1));
+    expect(clicked).toHaveBeenCalled();
+    expect(selected).not.toHaveBeenCalled();
+    expect(view.selectTask(1)).toBe(false);
+    expect(container.querySelector(".tlv-selected")).toBeNull();
   });
 
   it("rejects unknown event names", () => {

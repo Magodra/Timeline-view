@@ -15,6 +15,14 @@
         names on the right, and callout labels at different heights above and below the bar.
         "Support" runs past the timeline's finish, so its bar ends in an arrow. "Support",
         "Launch" and "Security audit" have their own <code>color</code>.
+        Click a task or a timeline to select it, Ctrl+Click (Cmd+Click on a Mac) to select several,
+        and click a selected item again to deselect. The buttons below are outside the component
+        and move the selected timelines with <code>moveTimelineUp</code> / <code>moveTimelineDown</code>.
+    </p>
+    <p class="controls">
+        <button type="button" id="move_up" disabled>Move up</button>
+        <button type="button" id="move_down" disabled>Move down</button>
+        <span id="selection">Nothing selected.</span>
     </p>
     <div id="timeline_here"></div>
 
@@ -57,6 +65,40 @@
                 ]}
             ]
         });
+
+        // External controls: move the selected timelines (Ctrl+Click selects several).
+        const moveUp = document.getElementById("move_up");
+        const moveDown = document.getElementById("move_down");
+        const positions = () => {
+            const order = timeline.serialize().timelines.map((t) => t.id);
+            return timeline.getSelectedTimelines().map((id) => order.indexOf(id)).sort((a, b) => a - b);
+        };
+        const updateControls = () => {
+            const at = positions();
+            const count = timeline.serialize().timelines.length;
+            moveUp.disabled = at.length === 0 || at[0] === 0;
+            moveDown.disabled = at.length === 0 || at[at.length - 1] === count - 1;
+            const tasks = timeline.getSelectedTasks();
+            const timelines = timeline.getSelectedTimelines();
+            document.getElementById("selection").textContent =
+                tasks.length ? `Selected tasks: ${tasks.join(", ")}`
+                : timelines.length ? `Selected timelines: ${timelines.join(", ")}`
+                : "Nothing selected.";
+        };
+        timeline.attachEvent("onTimelineSelected", updateControls);
+        timeline.attachEvent("onTaskSelected", updateControls);
+        // Move the top one first when going up, the bottom one first when going down.
+        const moveSelected = (up) => {
+            const order = timeline.serialize().timelines.map((t) => t.id);
+            const ids = timeline.getSelectedTimelines().sort((a, b) => order.indexOf(a) - order.indexOf(b));
+            for (const id of up ? ids : ids.reverse()) {
+                if (up) timeline.moveTimelineUp(id);
+                else timeline.moveTimelineDown(id);
+            }
+            updateControls();
+        };
+        moveUp.addEventListener("click", () => moveSelected(true));
+        moveDown.addEventListener("click", () => moveSelected(false));
     </script>
     <script>
         // A second view on the same page needs its own TimelineView.

@@ -50,5 +50,15 @@ export const moveEntry = (timelineId: Id, taskId: Id, patch: MovePatchData) =>
 export const attachEvent = <K extends TimelineEventName>(name: K, handler: TimelineHandlers[K]) =>
   instance().attachEvent(name, handler);
 export const detachEvent = (eventId: number) => instance().detachEvent(eventId);
+export const selectTask = (id: Id, add?: boolean) => instance().selectTask(id, add);
+export const selectTimeline = (id: Id, add?: boolean) => instance().selectTimeline(id, add);
+export const unselectTask = (id: Id) => instance().unselectTask(id);
+export const unselectTimeline = (id: Id) => instance().unselectTimeline(id);
+export const clearSelection = () => instance().clearSelection();
+export const getSelectedTasks = () => instance().getSelectedTasks();
+export const getSelectedTimelines = () => instance().getSelectedTimelines();
+export const moveTimelineUp = (id: Id) => instance().moveTimelineUp(id);
+export const moveTimelineDown = (id: Id) => instance().moveTimelineDown(id);
+export const moveTimeline = (id: Id, delta: number) => instance().moveTimeline(id, delta);
 export const on = <K extends keyof TimelineEvents>(name: K, handler: (event: TimelineEvents[K]) => void) =>
   instance().on(name, handler);

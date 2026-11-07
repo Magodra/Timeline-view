@@ -16,6 +16,9 @@
   --tlv-callout-bg: #ffffff;
   --tlv-connector: #8c959f;
   --tlv-drop: rgba(47, 111, 235, 0.12);
+  --tlv-selected: #0969da;
+  --tlv-selected-bg: rgba(9, 105, 218, 0.06);
+  --tlv-selected-text: #ffffff;
   --tlv-name-width: 32px;
   --tlv-date-width: 84px;
   --tlv-scale-height: 24px;
@@ -433,6 +436,21 @@
   clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
 }
 
+/* Selection: a ring around the selected task wherever it appears, and a tinted selected timeline. */
+.tlv-selected {
+  outline: 2px solid var(--tlv-selected);
+  outline-offset: 2px;
+}
+
+.tlv-timeline--selected {
+  background: var(--tlv-selected-bg);
+}
+
+.tlv-timeline--selected .tlv-name {
+  color: var(--tlv-selected-text);
+  background: var(--tlv-selected);
+}
+
 /* Drag and drop. */
 .tlv-dragging {
   opacity: 0.35;
@@ -467,5 +485,7 @@
     --tlv-callout-bg: #161b22;
     --tlv-connector: #6e7681;
     --tlv-drop: rgba(76, 141, 255, 0.16);
+    --tlv-selected: #4c8dff;
+    --tlv-selected-bg: rgba(76, 141, 255, 0.1);
   }
 }

@@ -36,7 +36,8 @@ An entry can't have both `line` and `callout_offset`. One task can appear on sev
     scale: "week",                    // hour | day | week | month | year (default day)
     name_position: "left",            // left | right (default left)
     milestone_symbol: "diamond",      // diamond | circle | square | triangle | star
-    show_dates: true                  // show Start and Finish dates beside each bar (default true)
+    show_dates: true,                 // show Start and Finish dates beside each bar (default true)
+    selection: true                   // clicks select and highlight tasks and timelines (default true)
   },
   tasks: [
     { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d", color: "#0a7f5a" },  // own color
@@ -176,10 +177,54 @@ timeline.detachEvent(eventId); // returns false if the id is unknown
 | Event | Handler | When |
 |-------|---------|------|
 | `onTaskClick` | `(id, e, timelineId)` | A task bar, milestone or callout label is clicked: pressed and released without dragging. `id` is the task's id, `e` the browser's pointer event, `timelineId` the timeline it was clicked on (a task can be on several). |
+| `onTimelineClick` | `(id, e)` | A timeline is clicked outside its tasks: its name, bar, time scale, dates or callout areas. |
+| `onTaskSelected` | `(ids)` | The selected tasks changed. `ids` lists all selected tasks; it is empty when none are selected any more. |
+| `onTimelineSelected` | `(ids)` | The selected timelines changed. `ids` lists all selected timelines; it is empty when none are selected any more. |
 
 Write the handler as a `function` to use `this`: an arrow function (`(id) => ...`) keeps the `this` of the code around it. In the script-tag setup, `this` is the default view, with the same methods as the global `timeline`.
 
 Dragging an item never counts as a click.
+
+### Selection
+
+With `view.selection` on (the default), you can select tasks or timelines, but not both at once: selecting a task deselects any timelines, and the other way round. A selected task has a ring around it wherever it appears; a selected timeline is tinted, with its name label filled in.
+
+| Action | Result |
+|--------|--------|
+| Click a task, or a timeline outside its tasks | Selects only that item. |
+| Click an item that is already selected | Clears the selection. |
+| Ctrl+Click (Cmd+Click on a Mac) | Adds the item to the selection, or removes it if it is already selected. On the other kind of item (a timeline while tasks are selected, or the reverse), it starts a new selection with just that item. |
+| Click the view's heading | Clears the selection. |
+
+Every change fires `onTaskSelected` and/or `onTimelineSelected` with the full list of selected ids; when the selection switches kind, the kind being left reports an empty list. You can also select from code, and read the selection:
+
+```js
+timeline.selectTask("design");          // select only this task
+timeline.selectTask("build", true);     // add it to the selected tasks
+timeline.unselectTask("design");        // remove one
+timeline.selectTimeline("dev");         // select a timeline (deselects all tasks)
+timeline.clearSelection();
+timeline.getSelectedTasks();            // ["build"], or [] when timelines (or nothing) are selected
+timeline.getSelectedTimelines();        // ["dev"], or []
+```
+
+Set `selection: false` in the view to turn selection off: clicks still fire `onTaskClick` and `onTimelineClick`, but nothing is selected or highlighted, and `selectTask`/`selectTimeline` return `false`. The highlight colors are `--tlv-selected`, `--tlv-selected-bg` and `--tlv-selected-text`. SVG exports leave the selection out.
+
+## Reordering timelines
+
+`moveTimelineUp(id)` and `moveTimelineDown(id)` move a timeline one place in the stack; `moveTimeline(id, delta)` moves it any number of places (negative is up). They return `false` when the timeline is already at the top or bottom. The new order is in `serialize()`. With a REST backend, saving the order is up to the host for now: the API has no call for it.
+
+The component has no buttons for this; add your own, for example for the selected timeline (as in [examples/features.html](../examples/features.html), which also moves several selected timelines together):
+
+```js
+document.getElementById("move_up").addEventListener("click", () => {
+  const [id] = timeline.getSelectedTimelines();
+  if (id !== undefined) timeline.moveTimelineUp(id);
+});
+timeline.attachEvent("onTimelineSelected", (ids) => {
+  document.getElementById("move_up").disabled = ids.length === 0;
+});
+```
 
 ### Moves
 

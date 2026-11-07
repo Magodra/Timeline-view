@@ -42,12 +42,26 @@ export interface TimelineHandlers {
    * clicked on, since a task can appear on several.
    */
   onTaskClick: (this: TimelineView, id: Id, e: MouseEvent, timelineId: Id) => void;
+  /**
+   * A timeline was clicked outside its tasks: its name, bar background, time
+   * scale, dates or callout areas.
+   */
+  onTimelineClick: (this: TimelineView, id: Id, e: MouseEvent) => void;
+  /** The selected tasks changed; `ids` are all selected tasks now, empty when none are. */
+  onTaskSelected: (this: TimelineView, ids: Id[]) => void;
+  /** The selected timelines changed; `ids` are all selected timelines now, empty when none are. */
+  onTimelineSelected: (this: TimelineView, ids: Id[]) => void;
 }
 
 export type TimelineEventName = keyof TimelineHandlers;
 
 /** The event names `attachEvent` accepts. */
-const HANDLER_NAMES: readonly TimelineEventName[] = ["onTaskClick"];
+const HANDLER_NAMES: readonly TimelineEventName[] = [
+  "onTaskClick",
+  "onTimelineClick",
+  "onTaskSelected",
+  "onTimelineSelected",
+];
 
 /** Thrown for moves queued behind one that failed; their changes were rolled back with it. */
 export class MoveCancelledError extends Error {
@@ -56,6 +70,8 @@ export class MoveCancelledError extends Error {
     this.name = "MoveCancelledError";
   }
 }
+
+type SelectionKind = "task" | "timeline";
 
 const isViewData = (body: unknown): body is TimelineViewData =>
   typeof body === "object" && body !== null && "view" in body && "timelines" in body;
@@ -68,6 +84,11 @@ export class TimelineView {
   /** `attachEvent` handlers by event id. */
   private readonly handlers = new Map<number, { name: TimelineEventName; handler: TimelineHandlers[TimelineEventName] }>();
   private lastEventId = 0;
+  /**
+   * Selection: tasks or timelines, never both at once. A selected task is
+   * highlighted wherever it appears.
+   */
+  private selected: { kind: SelectionKind; ids: Id[] } = { kind: "task", ids: [] };
   private readonly detachDrag: () => void;
   /** REST requests run one at a time, in the order the moves were made. */
   private queue: Promise<unknown> = Promise.resolve();
@@ -84,6 +105,7 @@ export class TimelineView {
       node,
       (e) => this.onDrop(e),
       (entry, e) => this.onEntryClick(entry, e),
+      (target, e) => this.onBackgroundClick(target, e),
     );
   }
 
@@ -91,6 +113,7 @@ export class TimelineView {
   parse(data: TimelineViewData): void {
     this.model = TimelineModel.fromData(data);
     this.render();
+    this.dropStaleSelection();
   }
 
   /** Fetches a view from the REST backend and renders it. */
@@ -106,7 +129,16 @@ export class TimelineView {
    */
   toSVG(): string {
     this.requireModel();
-    return toSVG(this.container);
+    // The export shows the timeline, not the current selection.
+    const selected = this.selected;
+    this.selected = { kind: "task", ids: [] };
+    this.applySelection();
+    try {
+      return toSVG(this.container);
+    } finally {
+      this.selected = selected;
+      this.applySelection();
+    }
   }
 
   /** The current data, in the same format `parse()` takes. */
@@ -136,6 +168,72 @@ export class TimelineView {
   /** Removes a handler added with `attachEvent`. Returns false if the id is unknown. */
   detachEvent(eventId: number): boolean {
     return this.handlers.delete(eventId);
+  }
+
+  /** The selected tasks' ids, in the order they were selected; empty when timelines (or nothing) are selected. */
+  getSelectedTasks(): Id[] {
+    return this.selected.kind === "task" ? [...this.selected.ids] : [];
+  }
+
+  /** The selected timelines' ids, in the order they were selected; empty when tasks (or nothing) are selected. */
+  getSelectedTimelines(): Id[] {
+    return this.selected.kind === "timeline" ? [...this.selected.ids] : [];
+  }
+
+  /**
+   * Selects a task, highlighted wherever it appears. With `add`, it joins the
+   * tasks already selected (as Ctrl+Click does); otherwise it replaces the
+   * selection. Selecting a task always deselects timelines. Fires the selected
+   * events for what changed. Returns false when selection is turned off
+   * (`view.selection: false`).
+   */
+  selectTask(id: Id, add = false): boolean {
+    const task = this.requireModel().findTask(id);
+    if (!task) throw new Error(`Task ${id} not found`);
+    return this.select("task", task.id, add);
+  }
+
+  /** Like `selectTask`, for a timeline. Selecting a timeline always deselects tasks. */
+  selectTimeline(id: Id, add = false): boolean {
+    const timeline = this.requireModel().findTimeline(id);
+    if (!timeline) throw new Error(`Timeline ${id} not found`);
+    return this.select("timeline", timeline.id, add);
+  }
+
+  /** Deselects one task. Returns false if it wasn't selected. */
+  unselectTask(id: Id): boolean {
+    return this.unselect("task", id);
+  }
+
+  /** Deselects one timeline. Returns false if it wasn't selected. */
+  unselectTimeline(id: Id): boolean {
+    return this.unselect("timeline", id);
+  }
+
+  /** Deselects everything. */
+  clearSelection(): void {
+    this.setSelection(this.selected.kind, []);
+  }
+
+  /** Moves a timeline one place up the stack. Returns false if it is already at the top. */
+  moveTimelineUp(id: Id): boolean {
+    return this.moveTimeline(id, -1);
+  }
+
+  /** Moves a timeline one place down the stack. Returns false if it is already at the bottom. */
+  moveTimelineDown(id: Id): boolean {
+    return this.moveTimeline(id, 1);
+  }
+
+  /**
+   * Moves a timeline `delta` places: negative is up, positive down. Returns
+   * false, changing nothing, past the top or bottom. The new order shows in
+   * `serialize()`; the REST API has no call for it yet.
+   */
+  moveTimeline(id: Id, delta: number): boolean {
+    const moved = this.requireModel().moveTimeline(id, delta);
+    if (moved) this.render();
+    return moved;
   }
 
   /**
@@ -255,7 +353,102 @@ export class TimelineView {
     // The DOM holds ids as strings; hand out the task's and timeline's own ids.
     const task = model?.tasks.find((t) => String(t.id) === entry.dataset.task);
     const timeline = model?.timelines.find((t) => String(t.id) === entry.dataset.timeline);
-    if (task && timeline) this.callHandlers("onTaskClick", task.id, e, timeline.id);
+    if (!model || !task || !timeline) return;
+    this.callHandlers("onTaskClick", task.id, e, timeline.id);
+    if (this.model === model) this.clickSelect("task", task.id, e);
+  }
+
+  /** A click on a timeline outside its tasks, or on the view's heading. */
+  private onBackgroundClick(target: HTMLElement, e: MouseEvent): void {
+    const model = this.model;
+    if (!model) return;
+    const row = target.closest<HTMLElement>(".tlv-timeline");
+    const timeline = row ? model.timelines.find((t) => String(t.id) === row.dataset.timeline) : undefined;
+    if (timeline) this.callHandlers("onTimelineClick", timeline.id, e);
+    if (this.model !== model) return;
+    // The view's heading clears the selection.
+    if (timeline) this.clickSelect("timeline", timeline.id, e);
+    else if (model.view.selection) this.clearSelection();
+  }
+
+  /**
+   * Selection by clicking. Click: select only this item, or, if it is
+   * already selected, clear the selection. Ctrl+Click (Cmd+Click on a Mac):
+   * add or remove this item; on the other kind of item it starts a new
+   * selection with just this one.
+   */
+  private clickSelect(kind: SelectionKind, id: Id, e: MouseEvent): void {
+    if (!this.requireModel().view.selection) return;
+    const isSelected = this.isSelected(kind, id);
+    if (e.ctrlKey || e.metaKey) {
+      if (isSelected) this.unselect(kind, id);
+      else this.select(kind, id, true);
+    } else if (isSelected) {
+      this.clearSelection();
+    } else {
+      this.select(kind, id, false);
+    }
+  }
+
+  private isSelected(kind: SelectionKind, id: Id): boolean {
+    return this.selected.kind === kind && this.selected.ids.some((x) => String(x) === String(id));
+  }
+
+  private select(kind: SelectionKind, id: Id, add: boolean): boolean {
+    if (!this.requireModel().view.selection) return false;
+    const keep = add && this.selected.kind === kind ? this.selected.ids : [];
+    if (keep.some((x) => String(x) === String(id))) return true;
+    this.setSelection(kind, [...keep, id]);
+    return true;
+  }
+
+  private unselect(kind: SelectionKind, id: Id): boolean {
+    if (!this.isSelected(kind, id)) return false;
+    this.setSelection(
+      kind,
+      this.selected.ids.filter((x) => String(x) !== String(id)),
+    );
+    return true;
+  }
+
+  /**
+   * Sets the selection and updates the highlight. Fires `onTaskSelected`
+   * and/or `onTimelineSelected` for each kind whose selection changed (the
+   * kind being left reports an empty list).
+   */
+  private setSelection(kind: SelectionKind, ids: Id[]): void {
+    const before = this.selected;
+    this.selected = { kind, ids };
+    this.applySelection();
+    const list = (k: SelectionKind, s: { kind: SelectionKind; ids: Id[] }) => (s.kind === k ? s.ids : []);
+    for (const k of ["task", "timeline"] as const) {
+      const was = list(k, before).map(String).join("\u0000");
+      const now = list(k, this.selected).map(String).join("\u0000");
+      if (was !== now) this.callHandlers(k === "task" ? "onTaskSelected" : "onTimelineSelected", [...list(k, this.selected)]);
+    }
+  }
+
+  /** After new data: forgets selected tasks or timelines that are gone, or everything if selection is off. */
+  private dropStaleSelection(): void {
+    const model = this.requireModel();
+    const { kind, ids } = this.selected;
+    const exists = (id: Id) => (kind === "task" ? model.findTask(id) : model.findTimeline(id)) !== undefined;
+    const kept = model.view.selection ? ids.filter(exists) : [];
+    if (kept.length !== ids.length) this.setSelection(kind, kept);
+  }
+
+  /** Marks the selected tasks' elements, or the selected timelines, in the DOM. */
+  private applySelection(): void {
+    const ids = new Set(this.selected.ids.map(String));
+    const tasks = this.selected.kind === "task";
+    for (const node of this.container.querySelectorAll<HTMLElement>("[data-entry]")) {
+      node.classList.toggle("tlv-selected", tasks && ids.has(node.dataset.task!));
+    }
+    for (const row of this.container.querySelectorAll<HTMLElement>(".tlv-timeline")) {
+      const selected = !tasks && ids.has(row.dataset.timeline!);
+      row.classList.toggle("tlv-timeline--selected", selected);
+      row.setAttribute("aria-selected", String(selected));
+    }
   }
 
   private emit<K extends keyof TimelineEvents>(name: K, event: TimelineEvents[K]): void {
@@ -269,5 +462,6 @@ export class TimelineView {
 
   private render(): void {
     render(this.container, this.requireModel());
+    this.applySelection();
   }
 }

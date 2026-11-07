@@ -24,6 +24,8 @@ export interface View {
   namePosition: NamePosition;
   milestoneSymbol: MilestoneSymbol;
   showDates: boolean;
+  /** Whether clicks select tasks and timelines. */
+  selection: boolean;
 }
 
 export interface Task {
@@ -120,6 +122,9 @@ export class TimelineModel {
     if (v.absolute !== undefined && typeof v.absolute !== "boolean") {
       throw new Error("view.absolute must be true or false");
     }
+    if (v.selection !== undefined && typeof v.selection !== "boolean") {
+      throw new Error("view.selection must be true or false");
+    }
 
     const view: View = {
       id: v.id,
@@ -129,6 +134,7 @@ export class TimelineModel {
       namePosition: v.name_position ?? "left",
       milestoneSymbol: v.milestone_symbol ?? "diamond",
       showDates: v.show_dates ?? true,
+      selection: v.selection ?? true,
     };
 
     const tasks = (data.tasks ?? []).map(taskFromData);
@@ -156,6 +162,7 @@ export class TimelineModel {
         name_position: v.namePosition,
         milestone_symbol: v.milestoneSymbol,
         show_dates: v.showDates,
+        selection: v.selection,
       },
       tasks: this.tasks.map(taskToData),
       timelines: this.timelines.map(timelineToData),
@@ -273,6 +280,20 @@ export class TimelineModel {
     trimLines(source);
     if (target !== source) trimLines(target);
     return target === source ? [source] : [source, target];
+  }
+
+  /**
+   * Moves a timeline `delta` places in the stack: -1 is up, 1 is down.
+   * Returns false, changing nothing, if it would move past the top or bottom.
+   */
+  moveTimeline(id: Id, delta: number): boolean {
+    const from = this.timelines.findIndex((t) => sameId(t.id, id));
+    if (from < 0) throw new Error(`Timeline ${id} not found`);
+    const to = from + delta;
+    if (!Number.isInteger(delta) || to < 0 || to >= this.timelines.length || to === from) return false;
+    const [timeline] = this.timelines.splice(from, 1);
+    this.timelines.splice(to, 0, timeline);
+    return true;
   }
 
   /** Replaces whole timelines, as returned by a successful REST move. */

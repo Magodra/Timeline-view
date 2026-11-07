@@ -24,6 +24,7 @@ Run `npm run lint` and `npm test` before calling a change done.
 - **Language:** TypeScript (strict mode). No runtime dependencies.
 - **Core:** framework-free library, usable from a plain `<script>` tag through a global `timeline` object and as an ES module. A React wrapper may come later (**TBD**).
 - **Build output:** `dist/timelineview.js` (UMD, global `timeline`), `dist/timelineview.mjs` (ESM), `dist/timelineview.css`, `dist/types/`. Built with Vite in library mode.
+- **Selection** (`view.selection`, default `true`): tasks or timelines can be selected, one kind at a time (selecting a task deselects timelines and the reverse). Click on a task, or on a timeline outside its tasks (name, bar, scale, dates, callout areas): select only that item; click on a selected item: clear the selection. Ctrl+Click (or Cmd+Click): add or remove the item; on the other kind it starts a new selection with just that item. Clicking the view's heading clears the selection. `onTaskSelected` / `onTimelineSelected` get the full list of selected ids (empty for the kind being left). A selected task gets a ring (`--tlv-selected`) wherever it appears; a selected timeline gets a tinted background (`--tlv-selected-bg`) and a filled name label. Dragging never selects. The selection survives re-renders and is dropped when its task or timeline disappears. `toSVG()` leaves it out.
 - **Drag and drop:** native pointer events (`src/drag.ts`), so the core needs no framework.
 - **Rendering:** plain DOM. The whole view re-renders after every change; there is no diffing.
 - **Dev dependencies:** Vite, Vitest, jsdom, TypeScript, and Puppeteer (only for the example images in the build; falls back to the installed Chrome).
@@ -124,7 +125,7 @@ Duration format: a whole number plus a unit: `h` (hours), `d` (days), `w` (weeks
 
 ### Not built yet
 
-- Renaming, adding, removing and reordering timelines in the UI. Today these come only from the data.
+- Renaming, adding and removing timelines in the UI. Today these come only from the data. Reordering works through `moveTimelineUp`/`moveTimelineDown` (the host supplies the buttons), but there is no REST call to save the order (**TBD**).
 - Editing a task's dates or duration by dragging or resizing.
 - Keyboard and screen-reader support for moving entries.
 - REST endpoints for creating and editing tasks and timelines (**TBD**).
@@ -143,7 +144,8 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
     scale: "week",                     // default "day"
     name_position: "left",             // default "left"
     milestone_symbol: "diamond",       // default "diamond"
-    show_dates: true                   // default true: Start/Finish dates beside each bar
+    show_dates: true,                  // default true: Start/Finish dates beside each bar
+    selection: true                    // default true: clicks select and highlight tasks and timelines
   },
   tasks: [
     { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d", color: "#0a7f5a" },   // finishes 2026-04-03; own color
@@ -171,7 +173,11 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
 | `timeline.toSVG()` | Returns the view as a standalone SVG document (a string), as it looks on screen. The view must be rendered and visible. Saving it is up to the host page; see [examples/export.html](examples/export.html). |
 | `timeline.moveEntry(timeline_id, task_id, patch)` | Moves an entry, as a drop does. Takes the PATCH body below, without `version`. |
 | `timeline.on("entry_moved" \| "move_failed", handler)` | Subscribes to move events. Returns an unsubscribe function. |
-| `timeline.attachEvent("onTaskClick", handler)` | Subscribes to a user event; returns an event id. `onTaskClick` gets `(task_id, event, timeline_id)` when a task bar, milestone or callout is clicked without dragging. Inside a `function` handler, `this` is the view. |
+| `timeline.attachEvent(name, handler)` | Subscribes to a user event; returns an event id. Inside a `function` handler, `this` is the view. Events: `onTaskClick (task_id, event, timeline_id)`: a task bar, milestone or callout clicked without dragging. `onTimelineClick (timeline_id, event)`: a timeline clicked outside its tasks. `onTaskSelected (task_ids)`, `onTimelineSelected (timeline_ids)`: the selection changed; the lists hold every selected id. |
+| `timeline.selectTask(id, add?)`, `selectTimeline(id, add?)` | Selects only this item, or with `add` adds it to the selection (same kind only). Return `false` when `view.selection` is off. |
+| `timeline.unselectTask(id)`, `unselectTimeline(id)`, `clearSelection()` | Deselects one item, or everything. |
+| `timeline.getSelectedTasks()`, `getSelectedTimelines()` | The selected ids, in the order they were selected; `[]` when the other kind (or nothing) is selected. |
+| `timeline.moveTimelineUp(id)`, `moveTimelineDown(id)`, `moveTimeline(id, delta)` | Reorders the timelines. Return `false` at the top or bottom. Not sent to the REST API. |
 | `timeline.detachEvent(event_id)` | Removes a handler added with `attachEvent`. Returns `false` for an unknown id. |
 | `new timeline.TimelineView(container, options)` | Separate instance, for more than one view on a page. Same methods. |
 

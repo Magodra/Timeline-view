@@ -72,19 +72,49 @@ function targetOf(node: HTMLElement): DropTarget {
  * Makes every `[data-entry]` inside `root` draggable. A press and release
  * without moving past the drag threshold is a click instead, reported to
  * `onClick` with the entry's element; a drag never reports a click.
+ * The same kind of click elsewhere in a timeline or on the view's heading
+ * (not on an entry) goes to `onBackgroundClick`, with the pressed element.
  * Returns a function that detaches.
  */
 export function attachDrag(
   root: HTMLElement,
   onDrop: (event: DropEvent) => void,
   onClick?: (entry: HTMLElement, event: PointerEvent) => void,
+  onBackgroundClick?: (target: HTMLElement, event: PointerEvent) => void,
 ): () => void {
   let cleanup: (() => void) | undefined;
 
+  /** A press on a timeline's background: a click if released without moving. */
+  const trackBackgroundClick = (down: PointerEvent, target: HTMLElement) => {
+    let moved = false;
+    const onMove = (move: PointerEvent) => {
+      if (Math.hypot(move.clientX - down.clientX, move.clientY - down.clientY) >= DRAG_THRESHOLD) moved = true;
+    };
+    const onUp = (up: PointerEvent) => {
+      done();
+      if (!moved) onBackgroundClick?.(target, up);
+    };
+    const done = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", done);
+      cleanup = undefined;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", done);
+    cleanup = done;
+  };
+
   const onPointerDown = (down: PointerEvent) => {
     if (down.button !== 0) return;
-    const source = (down.target as Element).closest<HTMLElement>("[data-entry]");
-    if (!source || !root.contains(source)) return;
+    const pressed = down.target as Element;
+    const source = pressed.closest<HTMLElement>("[data-entry]");
+    if (!source || !root.contains(source)) {
+      const background = pressed.closest<HTMLElement>(".tlv-timeline, .tlv-title");
+      if (background && root.contains(background)) trackBackgroundClick(down, pressed as HTMLElement);
+      return;
+    }
     down.preventDefault();
 
     const rect = source.getBoundingClientRect();

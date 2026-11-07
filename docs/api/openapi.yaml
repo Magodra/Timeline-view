@@ -160,6 +160,10 @@ components:
           type: boolean
           default: true
           description: Show each timeline's start and finish dates, with "Start" and "Finish" captions, beside its bar.
+        selection:
+          type: boolean
+          default: true
+          description: Clicks select and highlight tasks and timelines.
 
     Task:
       type: object

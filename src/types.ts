@@ -41,6 +41,11 @@ export interface ViewData {
   milestone_symbol?: MilestoneSymbol;
   /** Show each timeline's start and finish dates, with "Start" and "Finish" captions, beside its bar. Default: `true`. */
   show_dates?: boolean;
+  /**
+   * Clicking a task or timeline selects and highlights it, and fires
+   * `onTaskSelected` / `onTimelineSelected`. Default: `true`.
+   */
+  selection?: boolean;
 }
 
 /** A task's finish date is not stored: it is `start_date + duration`. */
