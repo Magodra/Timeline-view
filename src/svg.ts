@@ -110,7 +110,7 @@ class SvgWriter {
   size(): { width: number; height: number } {
     let width = 0;
     let height = 0;
-    for (const row of this.root.querySelectorAll(".tlv-timeline")) {
+    for (const row of this.root.querySelectorAll(".tlv-title, .tlv-timeline")) {
       const b = this.box(row);
       width = Math.max(width, b.x + b.width);
       height = Math.max(height, b.y + b.height);
@@ -295,6 +295,18 @@ export function toSVG(root: HTMLElement): string {
   const rootStyle = getComputedStyle(root);
   const { width, height } = out.size();
   if (isVisible(rootStyle.backgroundColor)) out.rect({ x: 0, y: 0, width, height }, rootStyle.backgroundColor);
+
+  const title = root.querySelector<HTMLElement>(".tlv-title");
+  if (title) {
+    const tb = out.box(title);
+    const ts = getComputedStyle(title);
+    if (isVisible(ts.backgroundColor)) out.rect(tb, ts.backgroundColor);
+    out.text(title);
+    if (parseFloat(ts.borderBottomWidth) > 0) {
+      const y = tb.y + tb.height - 0.5;
+      out.add(`<line x1="${num(tb.x)}" y1="${num(y)}" x2="${num(tb.x + tb.width)}" y2="${num(y)}" stroke="${ts.borderBottomColor}"/>`);
+    }
+  }
 
   for (const row of root.querySelectorAll<HTMLElement>(".tlv-timeline")) {
     const rs = getComputedStyle(row);

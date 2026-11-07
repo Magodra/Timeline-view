@@ -23,6 +23,7 @@ export interface Offset {
 export interface ViewData {
   /** Needed when a REST backend is configured. */
   id?: Id;
+  /** Shown as a heading above the timelines. Empty for no heading. */
   name: string;
   /**
    * `false` (default): each timeline's bar fills the full width, scaled to its

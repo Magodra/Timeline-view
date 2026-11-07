@@ -35,6 +35,13 @@ export function render(root: HTMLElement, model: TimelineModel): void {
   root.classList.add("tlv");
   root.classList.toggle("tlv--no-dates", !model.view.showDates);
   root.replaceChildren(...model.timelines.map((t) => renderTimeline(model, t)));
+  // The view's name, if it has one, as a heading above the timelines.
+  if (model.view.name.trim()) {
+    const title = el("div", "tlv-title", model.view.name);
+    title.setAttribute("role", "heading");
+    title.setAttribute("aria-level", "2");
+    root.prepend(title);
+  }
   layoutConnectors(root);
 }
 

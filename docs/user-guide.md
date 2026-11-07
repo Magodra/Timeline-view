@@ -2,6 +2,8 @@
 
 ## Concepts
 
+If the view has a `name`, it is shown as a centered heading above the timelines. Leave it empty (`""`) if your page already has its own heading.
+
 ![Two timelines with task bars, milestones and callouts above and below the bars](images/features.svg)
 
 *[examples/features.html](../examples/features.html): two timelines on a month scale, with callouts above and below the bars.*
@@ -23,7 +25,7 @@ A **task** is placed on a timeline by an **entry**, which says which area it goe
   version: 7,                         // optional, set by the REST backend
   view: {
     id: "v1",                         // needed with a REST backend
-    name: "Example",
+    name: "Example",                  // heading above the timelines; "" for none
     absolute: false,                  // true: all timelines on one common time axis (default false)
     scale: "week",                    // hour | day | week | month | year (default day)
     name_position: "left",            // left | right (default left)

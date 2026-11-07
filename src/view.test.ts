@@ -61,6 +61,20 @@ describe("rendering", () => {
     expect(callout.style.marginTop).toBe("16px");
   });
 
+  it("shows the view's name as a heading above the timelines, if it has one", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const title = container.firstElementChild!;
+    expect(title.className).toBe("tlv-title");
+    expect(title.textContent).toBe("Example");
+    expect(title.getAttribute("role")).toBe("heading");
+
+    const data = sample();
+    data.view.name = "";
+    view.parse(data);
+    expect(container.querySelector(".tlv-title")).toBeNull();
+  });
+
   it("shows a task's finish date as start_date + duration", () => {
     const data = sample();
     data.timelines[0].entries[0] = { task: 1, placement: "above", callout_offset: { x: 0, y: -40 } };
@@ -200,7 +214,7 @@ describe("toSVG", () => {
     expect(doc.querySelector("parsererror")).toBeNull();
     expect(doc.documentElement.namespaceURI).toBe("http://www.w3.org/2000/svg");
     const texts = [...doc.querySelectorAll("text")].map((t) => t.textContent);
-    expect(texts).toEqual(expect.arrayContaining(["Project", "Start", "Finish", "Task #1", "Milestone #1"]));
+    expect(texts).toEqual(expect.arrayContaining(["Example", "Project", "Start", "Finish", "Task #1", "Milestone #1"]));
     // The milestone callout: its symbol on the bar's edge and a dashed connector.
     expect(doc.querySelectorAll("polygon").length).toBeGreaterThan(0);
     expect(doc.querySelector("line[stroke-dasharray]")).not.toBeNull();

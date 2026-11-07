@@ -94,6 +94,7 @@ Duration format: a whole number plus a unit: `h` (hours), `d` (days), `w` (weeks
 
 ## User interface
 
+- **Heading:** if `view.name` is set (not empty), it is shown as a centered heading (`.tlv-title`, `role="heading"`) above the timelines. An empty name shows no heading.
 - The view shows its timelines stacked vertically, each in its own rectangular area.
 - **Container size:** the view renders into the host's element, which gets `overflow: auto`. The timelines always take their natural height. A container without a height fits them exactly and grows with them; a fixed `height` or `max-height` makes the view scroll vertically when the content is taller (or leaves empty space below when it's shorter). Each timeline is at least 480 px wide, so a narrower container scrolls sideways. Documented in the user guide, "Sizing the container".
 - **Name label:** each timeline's name is written vertically at its left or right edge (`view.name_position`).
@@ -137,7 +138,7 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
   version: 7,                          // optional; server version, used by the REST API
   view: {
     id: "v1",                          // required when api_url is set
-    name: "Example",
+    name: "Example",                   // shown as a heading above the timelines; "" for none
     absolute: false,                   // default false: each bar fills the width; true: common time axis
     scale: "week",                     // default "day"
     name_position: "left",             // default "left"

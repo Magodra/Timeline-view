@@ -135,7 +135,9 @@ components:
       required: [name]
       properties:
         id: { $ref: "#/components/schemas/Id" }
-        name: { type: string }
+        name:
+          type: string
+          description: Shown as a heading above the timelines; empty for no heading.
         absolute:
           type: boolean
           default: false
