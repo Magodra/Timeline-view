@@ -2,6 +2,10 @@
 
 ## Concepts
 
+![Two timelines with task bars, milestones and callouts above and below the bars](images/features.svg)
+
+*[examples/features.html](../examples/features.html): two timelines on a month scale, with callouts above and below the bars.*
+
 A **view** holds one or more **timelines**, stacked vertically. Each timeline has three **areas**:
 
 - **above:** callout labels above the bar.

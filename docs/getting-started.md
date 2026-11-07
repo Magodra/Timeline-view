@@ -2,6 +2,10 @@
 
 ## Add it to a page
 
+This page builds the timeline below (the same as [examples/basic.html](../examples/basic.html)):
+
+![One timeline with a task bar and a milestone callout below it](images/basic.svg)
+
 Build the library (`npm install`, then `npm run build`) and copy `dist/timelineview.js` and `dist/timelineview.css` into your site. Then:
 
 ```html

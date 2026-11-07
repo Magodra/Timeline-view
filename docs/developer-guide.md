@@ -37,9 +37,16 @@ parse(data) ──► TimelineModel.fromData ──► render() ──► DOM
 
 Example pages load `../dist/timelineview.js` with a plain `<script>` tag. In `npm run dev` a small Vite plugin rewrites that tag to load `src/global.ts`, so the pages run against the source without a build. Keep example pages in that shape: one bundle script tag, one stylesheet link, then plain inline scripts.
 
+## Example images
+
+`npm run build` ends with `scripts/export-examples.mjs`. It serves the repository, opens `examples/basic.html` and `examples/features.html` in headless Chrome (light mode) against the built bundle, and saves `timeline.toSVG()` to `docs/images/basic.svg` and `docs/images/features.svg`. The README and these docs show those images, so commit them whenever they change.
+
+It uses Puppeteer (a dev dependency). If Puppeteer's own Chrome wasn't downloaded (npm may block its install script; `npm approve-scripts puppeteer` allows it, or run `npx puppeteer browsers install chrome`), it falls back to the installed Chrome.
+
 ## Adding a feature
 
 1. Data format changes go in `types.ts` and `model.ts` (both directions: `fromData` and `toData`).
 2. Rules go in the model, with tests in `model.test.ts`.
 3. Update `CLAUDE.md`, `docs/`, and `docs/api/openapi.yaml` if the REST API changes.
 4. Add or update an example and list it in `examples/index.html`.
+5. Run `npm run build` and commit the regenerated images in `docs/images` if they changed.

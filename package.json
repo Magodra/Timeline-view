@@ -20,13 +20,14 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build && tsc -p tsconfig.build.json",
+    "build": "vite build && tsc -p tsconfig.build.json && node scripts/export-examples.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit"
   },
   "devDependencies": {
     "jsdom": "^31.0.0",
+    "puppeteer": "^25.16.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.6",
     "vitest": "^5.1.0"

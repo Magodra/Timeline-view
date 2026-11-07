@@ -103,9 +103,23 @@ class SvgWriter {
     this.add(clipTo ? `<g clip-path="url(#${this.clip(clipTo)})">${text}</g>` : text);
   }
 
+  /**
+   * The drawing's size: the timelines' extent, not the container's, so a
+   * container taller than its content doesn't add blank space.
+   */
+  size(): { width: number; height: number } {
+    let width = 0;
+    let height = 0;
+    for (const row of this.root.querySelectorAll(".tlv-timeline")) {
+      const b = this.box(row);
+      width = Math.max(width, b.x + b.width);
+      height = Math.max(height, b.y + b.height);
+    }
+    return { width: Math.ceil(width), height: Math.ceil(height) };
+  }
+
   toString(): string {
-    const width = Math.max(this.root.scrollWidth, this.root.clientWidth);
-    const height = Math.max(this.root.scrollHeight, this.root.clientHeight);
+    const { width, height } = this.size();
     return (
       `<svg xmlns="${SVG_NS}" width="${num(width)}" height="${num(height)}" viewBox="0 0 ${num(width)} ${num(height)}">` +
       this.parts.join("") +
@@ -237,8 +251,7 @@ function drawCalloutArea(out: SvgWriter, area: HTMLElement): void {
 export function toSVG(root: HTMLElement): string {
   const out = new SvgWriter(root);
   const rootStyle = getComputedStyle(root);
-  const width = Math.max(root.scrollWidth, root.clientWidth);
-  const height = Math.max(root.scrollHeight, root.clientHeight);
+  const { width, height } = out.size();
   if (isVisible(rootStyle.backgroundColor)) out.rect({ x: 0, y: 0, width, height }, rootStyle.backgroundColor);
 
   for (const row of root.querySelectorAll<HTMLElement>(".tlv-timeline")) {
