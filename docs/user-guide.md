@@ -201,4 +201,4 @@ Override the custom properties on `.tlv`:
 }
 ```
 
-See `src/styles.css` for the full list. The component follows the system's light or dark mode.
+See [src/styles.css](src/styles.css) for the full list. The component follows the system's light or dark mode.
