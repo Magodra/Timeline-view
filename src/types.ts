@@ -12,10 +12,11 @@ export type NamePosition = "left" | "right";
 /**
  * Callout label position, in px, relative to the attachment point on the
  * bar's edge: the middle of a task's span, or a milestone's date. `x` is to
- * the label's left edge. `y` is to the label's edge nearest the bar: ≤ 0
- * above the bar, ≥ 0 below it.
+ * the label's left edge. `y` is to the label's edge nearest the bar, and
+ * also picks the side: `y > 0` is below the bar, `y ≤ 0` above it.
  */
 export interface Offset {
+  /** Px from the attachment point to the label's left edge. */
   x: number;
   y: number;
 }
@@ -53,12 +54,17 @@ export interface TaskData {
   symbol?: MilestoneSymbol;
 }
 
+/**
+ * Where a task appears on a timeline. The area follows from the fields:
+ * - no `callout_offset`: on the bar, on bar `line` (default 0);
+ * - `callout_offset` with `y > 0`: a callout below the bar;
+ * - `callout_offset` with `y ≤ 0`: a callout above the bar.
+ */
 export interface EntryData {
   task: Id;
-  placement: Placement;
-  /** 0-based bar line. Only for `on`: callout areas have no lines. */
+  /** 0-based bar line, for an entry on the bar. Default: 0. Not allowed with `callout_offset`. */
   line?: number;
-  /** Only for `above` and `below`. Defaults to a small gap from the bar. */
+  /** Makes the entry a callout, and places its label (see `Offset`). */
   callout_offset?: Offset;
 }
 

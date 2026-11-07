@@ -78,7 +78,7 @@ paths:
             Invalid values: unknown `placement`; a `line` that is negative, past
             the last line + 1, or sent for a callout; `new_line` for a callout; `callout_offset`
             together with placement `on`; or `callout_offset.y` on the wrong side
-            of the bar.
+            of the bar (`> 0` above, or `≤ 0` below).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -123,8 +123,8 @@ components:
         Label position in px from the attachment point: the bar's edge at the
         middle of the task's span (a milestone's date).
         `x`: to the label's left edge.
-        `y`: to the label's edge nearest the bar; ≤ 0 above the bar, ≥ 0 below.
-        Default when missing: `{ x: 0, y: -16 }` above, `{ x: 0, y: 16 }` below.
+        `y`: to the label's edge nearest the bar. It also picks the side:
+        `y > 0` is below the bar, `y ≤ 0` above it.
       required: [x, y]
       properties:
         x: { type: number }
@@ -176,21 +176,22 @@ components:
         symbol: { $ref: "#/components/schemas/MilestoneSymbol" }
 
     Entry:
-      description: A bar entry has `line`; a callout has `callout_offset` and no line.
+      description: |
+        The area follows from the fields: without `callout_offset` the entry is
+        on the bar, on `line` (default 0); with `callout_offset` it is a callout,
+        below the bar if `callout_offset.y > 0`, above it otherwise.
       oneOf:
         - type: object
-          required: [task, placement, line]
+          required: [task]
           additionalProperties: false
           properties:
             task: { $ref: "#/components/schemas/Id" }
-            placement: { const: "on" }
-            line: { type: integer, minimum: 0 }
+            line: { type: integer, minimum: 0, default: 0 }
         - type: object
-          required: [task, placement]
+          required: [task, callout_offset]
           additionalProperties: false
           properties:
             task: { $ref: "#/components/schemas/Id" }
-            placement: { enum: [above, below] }
             callout_offset: { $ref: "#/components/schemas/Offset" }
 
     Timeline:
@@ -231,7 +232,11 @@ components:
         timeline_id:
           allOf: [{ $ref: "#/components/schemas/Id" }]
           description: Target timeline. Leave out to stay on the current one.
-        placement: { $ref: "#/components/schemas/Placement" }
+        placement:
+          allOf: [{ $ref: "#/components/schemas/Placement" }]
+          description: |
+            Target area. Needed in a move (unlike in the data format) because
+            moving onto the bar has no `callout_offset` to derive the area from.
         line:
           type: integer
           minimum: 0
@@ -246,7 +251,7 @@ components:
         callout_offset:
           allOf: [{ $ref: "#/components/schemas/Offset" }]
           description: |
-            Only for `above` and `below`. If left out, a callout keeps its offset,
+            Only for `above` and `below`; `y ≤ 0` above, `y > 0` below. If left out, a callout keeps its offset,
             mirrored (`y` → `-y`) when it switches side; an entry coming from the
             bar gets the default.
         version:

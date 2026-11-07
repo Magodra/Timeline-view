@@ -16,7 +16,13 @@ A **view** holds one or more **timelines**, stacked vertically. Each timeline ha
 
 The callout areas have no lines: each label is placed freely by its offset, and the area grows to fit all of its labels.
 
-A **task** is placed on a timeline by an **entry**, which says which area it goes in and either its bar line or its label offset. One task can appear on several timelines, but only once on each.
+A **task** is placed on a timeline by an **entry**. The entry's fields decide the area:
+
+- `{ task: 1, line: 1 }`: on the bar, on line 1. Leave out `line` for line 0.
+- `{ task: 2, callout_offset: { x: 30, y: 16 } }`: a callout; `y > 0` puts it below the bar.
+- `{ task: 3, callout_offset: { x: 0, y: -16 } }`: a callout; `y` zero or negative puts it above the bar.
+
+An entry can't have both `line` and `callout_offset`. One task can appear on several timelines, but only once on each.
 
 ## Data format
 
@@ -41,8 +47,8 @@ A **task** is placed on a timeline by an **entry**, which says which area it goe
       start_date: "2026-03-01",       // ISO 8601: YYYY-MM-DD or YYYY-MM-DDTHH:mm
       finish_date: "2026-05-01",
       entries: [
-      { task: 1, placement: "on", line: 1 },                                 // bar line 1
-      { task: 2, placement: "below", callout_offset: { x: 30, y: 16 } }      // label below the bar
+      { task: 1, line: 1 },                                 // bar line 1
+      { task: 2, callout_offset: { x: 30, y: 16 } }      // label below the bar
     ]}
   ]
 }
@@ -91,9 +97,9 @@ An entry placed `above` or `below` is shown as a label with the task's name, sta
 A dashed connector runs from the middle of the marker to the label. `callout_offset` places the label, in pixels from the attachment point, which is the bar's edge at the middle of the task's dates (a milestone's date):
 
 - `x`: to the label's left edge.
-- `y`: to the label's edge nearest the bar. Zero or negative above the bar, zero or positive below it.
+- `y`: to the label's edge nearest the bar. It also picks the side: positive is below the bar, zero or negative above it.
 
-Without `callout_offset`, a label sits 16 pixels from the bar. The area grows or shrinks so every label fits inside it.
+An entry without `callout_offset` is on the bar, not a callout. The area grows or shrinks so every label fits inside it.
 
 ## Sizing the container
 

@@ -78,7 +78,7 @@ The hierarchy, from outermost to innermost:
 | **Timeline** | One horizontal band (a row or swimlane) in the view, with a name and its own time range (`start_date`, `finish_date`). |
 | **Area**     | One of the three parts of a timeline: callouts `above`, the bar itself (`on`), and callouts `below`. |
 | **Line**     | A sub-row of the bar (`on`) area. Callout areas have no lines. |
-| **Entry**    | The placement of a task on a timeline: `task`, `placement` (`above` \| `on` \| `below`), and either `line` (bar) or `callout_offset` (callouts). A task appears at most once per timeline, so the pair (timeline `id`, `task`) identifies an entry. |
+| **Entry**    | The placement of a task on a timeline: `task`, plus either `line` (on the bar, default 0) or `callout_offset` (a callout). The area is derived, not stored: no `callout_offset` means on the bar; `callout_offset.y > 0` means below; `y ≤ 0` means above. Internally the model keeps a `placement` (`above` \| `on` \| `below`). A task appears at most once per timeline, so the pair (timeline `id`, `task`) identifies an entry. |
 | **Task**     | The single item entity, identified by `id`. A task can appear on several timelines through entries. Its `finish_date` is `start_date + duration`: derived, never stored. |
 
 ### Task kinds
@@ -112,8 +112,8 @@ Duration format: a whole number plus a unit: `h` (hours), `d` (days), `w` (weeks
 
   A dashed connector runs from the middle of the marker's outer edge to the nearest point of the label. The attachment point is the bar's edge at the middle of the task's span (a milestone's date). The label is placed only by `callout_offset`, in px from the attachment point:
   - `x`: to the label's left edge.
-  - `y`: to the label's edge nearest the bar. `y ≤ 0` above the bar, `y ≥ 0` below it, so a label never overlaps the bar.
-  - Without an offset, a label sits 16 px from the bar (`{ x: 0, y: ∓16 }`).
+  - `y`: to the label's edge nearest the bar, and it picks the side: `y > 0` below the bar, `y ≤ 0` above it, so a label never overlaps the bar. A label flush below the bar has `y = 1`, since `y = 0` means above.
+  - An entry without `callout_offset` is on the bar, not a callout. A callout created by a move without an offset (for example a bar dragged by `moveEntry` with only `placement`) sits 16 px from the bar (`{ x: 0, y: ∓16 }`).
 - **Area size:** each callout area's height fits all of its labels, plus padding on the outer side to drop into. It is a one-cell CSS grid where labels are placed with margins, so the browser sizes it (see `render.ts`).
 - **Drag and drop:**
   - Task bars and milestones can be dragged between bar lines and timelines. A drop on a bar line goes to the line under the pointer. The bar has a virtual half line above its first line and below its last; dropping there inserts a new line at the top or bottom.
@@ -151,14 +151,14 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
   ],
   timelines: [
     { id: 1, name: "Project", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [
-      { task: 1, placement: "on", line: 1 },
-      { task: 2, placement: "below", callout_offset: { x: 30, y: 16 } }
+      { task: 1, line: 1 },
+      { task: 2, callout_offset: { x: 30, y: 16 } }
     ]}
   ]
 }
 ```
 
-`parse()` throws on invalid data: a timeline without `start_date` or `finish_date`, or finishing before it starts; bad dates or durations, duplicate task ids, entries for unknown tasks, a task twice on one timeline, a bar entry without `line` or with `callout_offset`, a callout with `line`, or a `callout_offset.y` on the wrong side of the bar.
+`parse()` throws on invalid data: a timeline without `start_date` or `finish_date`, or finishing before it starts; bad dates or durations, duplicate task ids, entries for unknown tasks, a task twice on one timeline, a negative or fractional `line`, an entry with both `line` and `callout_offset`, or a `callout_offset` without numeric `x` and `y`.
 
 ## JavaScript API
 
@@ -183,6 +183,8 @@ The API is optional. Turn it on with `timeline.init("timeline_here", { api_url: 
 
 ### Move a callout
 
+The move body still names the target area with `placement`, because moving onto the bar has no offset to derive it from. The entries in responses use the data format above (no `placement`).
+
 `PATCH /views/{view_id}/timelines/{timeline_id}/entries/{task_id}`
 
 This covers every way a user can move a callout: dragging the label to a new position (offset), switching side (`above` / `below`), moving it onto the bar (`on`), or dragging it to another timeline. Bars and milestones on the bar use the same call. Send only the fields that change:
@@ -202,7 +204,7 @@ This covers every way a user can move a callout: dragging the label to a new pos
 | `placement`      | New area: `above`, `on`, or `below`. Moving to `on` drops `callout_offset`. |
 | `line`           | Bar line, only with placement `on`, from 0 to one past the last line (which opens a new line at the bottom). Defaults to 0 when coming from another area or timeline, otherwise the current line. |
 | `new_line`       | `true` inserts a new bar line at `line` and shifts the lines from there down by one. Only with placement `on`. The UI sends `line: 0` (top) or one past the last line (bottom). |
-| `callout_offset` | New `{ x, y }` (see [User interface](#user-interface)). Only for `above` and `below`; `y` must be on the right side of the bar. If left out, a callout keeps its offset, mirrored (`y` → `-y`) when it switches side; an entry coming from the bar gets the default. |
+| `callout_offset` | New `{ x, y }` (see [User interface](#user-interface)). Only for `above` and `below`; `y` must be on the right side of the bar (`≤ 0` above, `> 0` below). If left out, a callout keeps its offset, mirrored (`y` → `-y`) when it switches side; an entry coming from the bar gets the default. |
 | `version`        | The view version the client last saw, for optimistic concurrency. |
 
 Responses:

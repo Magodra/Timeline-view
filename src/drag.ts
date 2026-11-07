@@ -35,7 +35,7 @@ export function calloutOffset(box: Rect, area: Rect, at: number, placement: "abo
   const y =
     placement === "above"
       ? Math.min(0, Math.round(box.bottom - area.bottom))
-      : Math.max(0, Math.round(box.top - area.top));
+      : Math.max(1, Math.round(box.top - area.top)); // y = 0 would mean above
   return { x, y: y === 0 ? 0 : y }; // no -0
 }
 

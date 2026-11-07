@@ -43,16 +43,16 @@
             ],
             timelines: [
                 { id: "dev", name: "Development", start_date: "2026-01-01", finish_date: "2027-07-01", entries: [
-                    { task: "design", placement: "on", line: 0 },
-                    { task: "build", placement: "on", line: 1 },
-                    { task: "kickoff", placement: "above", callout_offset: { x: 0, y: -16 } },
-                    { task: "review", placement: "above", callout_offset: { x: -40, y: -64 } },
-                    { task: "beta", placement: "below", callout_offset: { x: 12, y: 16 } }
+                    { task: "design", line: 0 },
+                    { task: "build", line: 1 },
+                    { task: "kickoff", callout_offset: { x: 0, y: -16 } },
+                    { task: "review", callout_offset: { x: -40, y: -64 } },
+                    { task: "beta", callout_offset: { x: 12, y: 16 } }
                 ]},
                 { id: "ops", name: "Operations", start_date: "2026-01-01", finish_date: "2027-07-01", entries: [
-                    { task: "launch", placement: "on", line: 0 },
-                    { task: "support", placement: "on", line: 1 },
-                    { task: "audit", placement: "below", callout_offset: { x: -60, y: 40 } }
+                    { task: "launch", line: 0 },
+                    { task: "support", line: 1 },
+                    { task: "audit", callout_offset: { x: -60, y: 40 } }
                 ]}
             ]
         });
@@ -75,18 +75,18 @@
             ],
             timelines: [
                 { id: "discovery", name: "Discovery", start_date: "2026-01-01", finish_date: "2026-06-01", entries: [
-                    { task: "research", placement: "on", line: 0 },
-                    { task: "prototype", placement: "on", line: 1 },
-                    { task: "go", placement: "above", callout_offset: { x: -40, y: -16 } }
+                    { task: "research", line: 0 },
+                    { task: "prototype", line: 1 },
+                    { task: "go", callout_offset: { x: -40, y: -16 } }
                 ]},
                 { id: "delivery", name: "Delivery", start_date: "2026-03-01", finish_date: "2026-12-01", entries: [
-                    { task: "build", placement: "on", line: 0 },
-                    { task: "rollout", placement: "on", line: 1 }
+                    { task: "build", line: 0 },
+                    { task: "rollout", line: 1 }
                 ]},
                 { id: "operations", name: "Operations", start_date: "2026-09-01", finish_date: "2027-03-01", entries: [
-                    { task: "launch", placement: "on", line: 0 },
-                    { task: "support", placement: "on", line: 1 },
-                    { task: "migration", placement: "above", callout_offset: { x: 10, y: -16 } }
+                    { task: "launch", line: 0 },
+                    { task: "support", line: 1 },
+                    { task: "migration", callout_offset: { x: 10, y: -16 } }
                 ]}
             ]
         });

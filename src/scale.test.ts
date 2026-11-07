@@ -63,6 +63,7 @@ describe("calloutOffset", () => {
     expect(calloutOffset(box(230, 450), area(400, 500), 0.25, "below")).toEqual({ x: 30, y: 50 });
     // Beyond the area's outer edge is fine: the area grows to fit.
     expect(calloutOffset(box(230, 700), area(400, 500), 0.25, "below")).toEqual({ x: 30, y: 300 });
-    expect(calloutOffset(box(230, 380), area(400, 500), 0.25, "below")).toEqual({ x: 30, y: 0 });
+    // At least 1 px below: y = 0 would mean above in the data format.
+    expect(calloutOffset(box(230, 380), area(400, 500), 0.25, "below")).toEqual({ x: 30, y: 1 });
   });
 });

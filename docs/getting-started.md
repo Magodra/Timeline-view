@@ -27,8 +27,8 @@ Build the library (`npm install`, then `npm run build`) and copy `dist/timelinev
             ],
             timelines: [
                 { id: 1, name: "Project", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [
-                    { task: 1, placement: "on", line: 1 },
-                    { task: 2, placement: "below", callout_offset: { x: 30, y: 16 } }
+                    { task: 1, line: 1 },
+                    { task: 2, callout_offset: { x: 30, y: 16 } }
                 ]}
             ]
         });
@@ -55,7 +55,7 @@ Without a backend, listen for moves and save them yourself:
 
 ```js
 timeline.on("entry_moved", ({ timeline_id, task_id, patch }) => {
-    // patch holds only the changed fields: timeline_id, placement, line, callout_offset
+    // patch holds only the changed fields: timeline_id, placement, line, new_line, callout_offset
     save(timeline_id, task_id, patch);
 });
 ```

@@ -93,7 +93,8 @@ export const defaultOffset = (placement: "above" | "below"): Offset => ({
 function offsetProblem(o: unknown, placement: "above" | "below"): string | undefined {
   if (!isOffset(o)) return "callout_offset needs numeric x and y";
   if (placement === "above" && o.y > 0) return "callout_offset.y must be ≤ 0 above the bar";
-  if (placement === "below" && o.y < 0) return "callout_offset.y must be ≥ 0 below the bar";
+  // y = 0 means above in the data format, so below needs y > 0.
+  if (placement === "below" && o.y <= 0) return "callout_offset.y must be > 0 below the bar";
   return undefined;
 }
 
@@ -178,21 +179,20 @@ export class TimelineModel {
   private entryFromData(timelineId: Id, e: EntryData): Entry {
     const where = `Timeline ${timelineId}, task ${e.task}`;
     if (!this.findTask(e.task)) throw new Error(`${where}: unknown task`);
-    if (!PLACEMENTS.includes(e.placement)) throw new Error(`${where}: unknown placement`);
 
-    if (e.placement === "on") {
-      if (!isLineIndex(e.line)) throw new Error(`${where}: line must be a whole number ≥ 0`);
-      if (e.callout_offset !== undefined) {
-        throw new Error(`${where}: callout_offset is only valid above or below the bar`);
-      }
-      return { taskId: e.task, placement: "on", line: e.line };
+    // No callout_offset: on the bar, line 0 unless given.
+    if (e.callout_offset === undefined) {
+      const line = e.line ?? 0;
+      if (!isLineIndex(line)) throw new Error(`${where}: line must be a whole number ≥ 0`);
+      return { taskId: e.task, placement: "on", line };
     }
 
-    if (e.line !== undefined) throw new Error(`${where}: callouts have no line, only callout_offset`);
-    const offset = e.callout_offset ?? defaultOffset(e.placement);
-    const problem = offsetProblem(offset, e.placement);
-    if (problem) throw new Error(`${where}: ${problem}`);
-    return { taskId: e.task, placement: e.placement, calloutOffset: { x: offset.x, y: offset.y } };
+    // A callout: y > 0 is below the bar, y ≤ 0 above it.
+    if (e.line !== undefined) throw new Error(`${where}: a callout (with callout_offset) has no line`);
+    const offset = e.callout_offset;
+    if (!isOffset(offset)) throw new Error(`${where}: callout_offset needs numeric x and y`);
+    const placement = offset.y > 0 ? "below" : "above";
+    return { taskId: e.task, placement, calloutOffset: { x: offset.x, y: offset.y === 0 ? 0 : offset.y } };
   }
 
   findTask(id: Id): Task | undefined {
@@ -292,7 +292,9 @@ export class TimelineModel {
 function keptOffset(entry: Entry, placement: "above" | "below"): Offset {
   if (entry.placement === "on") return defaultOffset(placement);
   const { x, y } = entry.calloutOffset;
-  return entry.placement === placement ? { x, y } : { x, y: -y };
+  if (entry.placement === placement) return { x, y };
+  // Mirrored. A label flush above the bar (y = 0) goes 1 px below it, since y = 0 means above.
+  return { x, y: placement === "below" ? Math.max(1, -y) : -y };
 }
 
 /**
@@ -370,8 +372,8 @@ export function timelineToData(t: Timeline): TimelineData {
     finish_date: formatDate(t.finish),
     entries: t.entries.map((e) =>
       e.placement === "on"
-        ? { task: e.taskId, placement: e.placement, line: e.line }
-        : { task: e.taskId, placement: e.placement, callout_offset: { ...e.calloutOffset } },
+        ? { task: e.taskId, line: e.line }
+        : { task: e.taskId, callout_offset: { ...e.calloutOffset } },
     ),
   };
 }

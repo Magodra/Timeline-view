@@ -17,8 +17,8 @@ function sample(): TimelineViewData {
         start_date: "2026-03-01",
         finish_date: "2026-05-01",
         entries: [
-          { task: 1, placement: "on", line: 1 },
-          { task: 2, placement: "below", callout_offset: { x: 30, y: 16 } },
+          { task: 1, line: 1 },
+          { task: 2, callout_offset: { x: 30, y: 16 } },
         ],
       },
     ],
@@ -77,7 +77,7 @@ describe("rendering", () => {
 
   it("shows a task's finish date as start_date + duration", () => {
     const data = sample();
-    data.timelines[0].entries[0] = { task: 1, placement: "above", callout_offset: { x: 0, y: -40 } };
+    data.timelines[0].entries[0] = { task: 1, callout_offset: { x: 0, y: -40 } };
     new TimelineView("tl").parse(data);
     const callout = container.querySelector<HTMLElement>(".tlv-area--above .tlv-callout")!;
     expect(callout.textContent).toContain("2026-04-01 – 2026-04-03");
@@ -116,7 +116,7 @@ describe("rendering", () => {
 
   it("marks a task callout with an edge bar over its span and attaches at the span's middle", () => {
     const data = sample();
-    data.timelines[0].entries[0] = { task: 1, placement: "above", callout_offset: { x: 0, y: -40 } };
+    data.timelines[0].entries[0] = { task: 1, callout_offset: { x: 0, y: -40 } };
     new TimelineView("tl").parse(data);
     const area = container.querySelector(".tlv-area--above")!;
     const bar = area.querySelector<HTMLElement>(".tlv-edge-bar")!;
@@ -129,7 +129,7 @@ describe("rendering", () => {
 
   it("draws milestones on the bar with the configured symbol", () => {
     const data = sample();
-    data.timelines[0].entries[1] = { task: 2, placement: "on", line: 0 };
+    data.timelines[0].entries[1] = { task: 2, line: 0 };
     new TimelineView("tl").parse(data);
     expect(container.querySelector(".tlv-milestone .tlv-symbol--star")).not.toBeNull();
   });
@@ -182,9 +182,9 @@ describe("timeline ranges", () => {
       { id: 5, text: "Longer", start_date: "2026-04-20", duration: "1m" },
     );
     data.timelines[0].entries.push(
-      { task: 3, placement: "on", line: 2 },
-      { task: 4, placement: "on", line: 3 },
-      { task: 5, placement: "above", callout_offset: { x: 0, y: -16 } },
+      { task: 3, line: 2 },
+      { task: 4, line: 3 },
+      { task: 5, callout_offset: { x: 0, y: -16 } },
     );
     new TimelineView("tl").parse(data);
     const task = (id: number) => container.querySelector<HTMLElement>(`.tlv-task[data-task="${id}"]`)!;
@@ -249,7 +249,7 @@ describe("moveEntry without a backend", () => {
       patch: { placement: "above", callout_offset: { x: 10, y: -24 } },
     });
     expect(container.querySelector('.tlv-area--above .tlv-callout')).not.toBeNull();
-    expect(view.serialize().timelines[0].entries[1].placement).toBe("above");
+    expect(view.serialize().timelines[0].entries[1].callout_offset!.y).toBeLessThanOrEqual(0); // above
   });
 
   it("rejects invalid moves and fires move_failed", async () => {
@@ -292,7 +292,7 @@ describe("moveEntry with a REST backend", () => {
 
     await expect(view.moveEntry(1, 2, { placement: "above" })).rejects.toMatchObject({ status: 422 });
 
-    expect(view.serialize().timelines[0].entries[1].placement).toBe("below");
+    expect(view.serialize().timelines[0].entries[1].callout_offset!.y).toBeGreaterThan(0); // below
     expect(failed.mock.calls[0][0].error).toMatchObject({ status: 422 });
   });
 
@@ -322,7 +322,7 @@ describe("moveEntry with a REST backend", () => {
     await expect(second).rejects.toThrow("cancelled");
     expect(fetch).toHaveBeenCalledOnce();
     // Both moves were rolled back.
-    expect(view.serialize().timelines[0].entries[1]).toMatchObject({ placement: "below", callout_offset: { x: 30, y: 16 } });
+    expect(view.serialize().timelines[0].entries[1]).toEqual({ task: 2, callout_offset: { x: 30, y: 16 } });
 
     fail = false;
     await view.moveEntry(1, 2, { placement: "above" });
