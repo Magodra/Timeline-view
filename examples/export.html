@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Timeline view - SVG export</title>
+    <script src="../dist/timelineview.js"></script>
+    <link href="../dist/timelineview.css" rel="stylesheet">
+    <link href="examples.css" rel="stylesheet">
+</head>
+<body>
+    <h1>SVG export</h1>
+    <p>The download button is part of the page, not the component: it calls <code>timeline.toSVG()</code> and saves the result. Move things around first; the export shows the view as it is now.</p>
+    <p class="controls"><button type="button" id="download">Download SVG</button></p>
+    <div id="timeline_here" style="width: 1000px; max-width: 100%;"></div>
+    <script>
+        timeline.init("timeline_here");
+        timeline.parse({
+            view: { name: "Release plan", start_date: "2026-01-01", finish_date: "2026-07-01", scale: "month" },
+            tasks: [
+                { id: 1, text: "Design", start_date: "2026-01-05", duration: "6w" },
+                { id: 2, text: "Build", start_date: "2026-02-16", duration: "3m" },
+                { id: 3, text: "Kick-off", start_date: "2026-01-05", symbol: "square" },
+                { id: 4, text: "Beta", start_date: "2026-04-15", symbol: "triangle" },
+                { id: 5, text: "Launch", start_date: "2026-06-01", symbol: "star" },
+                { id: 6, text: "Security audit", start_date: "2026-05-04", duration: "2w" }
+            ],
+            timelines: [
+                { id: "dev", name: "Development", entries: [
+                    { task: 1, placement: "on", line: 0 },
+                    { task: 2, placement: "on", line: 1 },
+                    { task: 3, placement: "above", callout_offset: { x: 0, y: -16 } },
+                    { task: 4, placement: "below", callout_offset: { x: 20, y: 24 } }
+                ]},
+                { id: "ops", name: "Operations", entries: [
+                    { task: 5, placement: "on", line: 0 },
+                    { task: 6, placement: "above", callout_offset: { x: -50, y: -24 } }
+                ]}
+            ]
+        });
+
+        // Save the SVG with a temporary link to a Blob URL.
+        document.getElementById("download").addEventListener("click", () => {
+            const blob = new Blob([timeline.toSVG()], { type: "image/svg+xml" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "timeline.svg";
+            link.click();
+            // Free the Blob once the download has started.
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        });
+    </script>
+</body>
+</html>

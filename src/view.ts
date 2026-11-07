@@ -2,6 +2,7 @@ import { ApiError, RestClient } from "./api";
 import { attachDrag, type DropEvent } from "./drag";
 import { patchFromData, TimelineModel } from "./model";
 import { render } from "./render";
+import { toSVG } from "./svg";
 import type { Id, MovePatchData, TimelineViewData } from "./types";
 
 export interface TimelineOptions {
@@ -71,6 +72,16 @@ export class TimelineView {
   async load(viewId: Id): Promise<void> {
     if (!this.api) throw new Error("load() needs the api_url option");
     this.parse(await this.api.getView(viewId));
+  }
+
+  /**
+   * The view as a standalone SVG document, as it looks on screen now. The
+   * view must be rendered in the page and visible, since the export reads
+   * its layout.
+   */
+  toSVG(): string {
+    this.requireModel();
+    return toSVG(this.container);
   }
 
   /** The current data, in the same format `parse()` takes. */

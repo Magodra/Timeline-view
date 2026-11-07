@@ -119,6 +119,35 @@ describe("rendering", () => {
   });
 });
 
+describe("toSVG", () => {
+  it("exports the view as a standalone SVG document", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const svg = view.toSVG();
+    const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+    expect(doc.querySelector("parsererror")).toBeNull();
+    expect(doc.documentElement.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    const texts = [...doc.querySelectorAll("text")].map((t) => t.textContent);
+    expect(texts).toEqual(expect.arrayContaining(["Project", "Start", "Finish", "Task #1", "Milestone #1"]));
+    // The milestone callout: its symbol on the bar's edge and a dashed connector.
+    expect(doc.querySelectorAll("polygon").length).toBeGreaterThan(0);
+    expect(doc.querySelector("line[stroke-dasharray]")).not.toBeNull();
+  });
+
+  it("escapes text", () => {
+    const data = sample();
+    data.tasks[0].text = `<b>"R&D"</b>`;
+    const view = new TimelineView("tl");
+    view.parse(data);
+    const doc = new DOMParser().parseFromString(view.toSVG(), "image/svg+xml");
+    expect([...doc.querySelectorAll("text")].map((t) => t.textContent)).toContain(`<b>"R&D"</b>`);
+  });
+
+  it("needs data first", () => {
+    expect(() => new TimelineView("tl").toSVG()).toThrow();
+  });
+});
+
 describe("moveEntry without a backend", () => {
   it("applies the move, re-renders and fires entry_moved", async () => {
     const view = new TimelineView("tl");

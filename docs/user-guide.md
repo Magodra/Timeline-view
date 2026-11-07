@@ -87,6 +87,25 @@ The number of bar lines comes from the entries: one more than the highest `line`
 
 Dragging doesn't change a task's dates.
 
+## Exporting as SVG
+
+`timeline.toSVG()` returns the view as an SVG document, exactly as it looks on screen now, including your theme. It is plain SVG (shapes and text), so it opens in browsers and in drawing tools. The view must be shown on the page when you call it.
+
+The component has no export button of its own; add one to your page:
+
+```js
+document.getElementById("download").addEventListener("click", () => {
+  const url = URL.createObjectURL(new Blob([timeline.toSVG()], { type: "image/svg+xml" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "timeline.svg";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+```
+
+Text in the SVG uses the page's fonts by name, so on a computer without those fonts it falls back to a similar one.
+
 ## Events
 
 ```js

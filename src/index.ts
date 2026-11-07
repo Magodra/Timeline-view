@@ -36,6 +36,7 @@ export function init(container: string | HTMLElement, options?: TimelineOptions)
 export const parse = (data: TimelineViewData) => instance().parse(data);
 export const load = (viewId: Id) => instance().load(viewId);
 export const serialize = () => instance().serialize();
+export const toSVG = () => instance().toSVG();
 export const moveEntry = (timelineId: Id, taskId: Id, patch: MovePatchData) =>
   instance().moveEntry(timelineId, taskId, patch);
 export const on = <K extends keyof TimelineEvents>(name: K, handler: (event: TimelineEvents[K]) => void) =>

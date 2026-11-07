@@ -5,6 +5,7 @@ A timeline view for use in web planning applications. Framework-free TypeScript 
 - Several timelines stacked in one view, on an hour, day, week, month or year scale.
 - Tasks drawn as bars and milestones as symbols, on the bar or as callouts above and below it.
 - Drag and drop between lines, areas and timelines.
+- Export as SVG (`timeline.toSVG()`).
 - Optional REST backend for saving moves, with optimistic updates and rollback.
 
 ```sh

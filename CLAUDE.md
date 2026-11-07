@@ -46,6 +46,7 @@ Run `npm run lint` and `npm test` before calling a change done.
   dates.ts      UTC date parsing, formatting and arithmetic
   duration.ts   Duration parsing
   api.ts        REST client
+  svg.ts        SVG export, built from the rendered DOM
   styles.css    Component styles; themable through --tlv-* custom properties
 /examples       Runnable HTML pages, listed in examples/index.html
 /docs           Getting started, user guide, developer guide, api/openapi.yaml
@@ -156,6 +157,7 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
 | `timeline.parse(data)` | Loads data and renders it. |
 | `timeline.load(view_id)` | Loads with `GET /views/{view_id}` (needs `api_url`). |
 | `timeline.serialize()` | Returns the current data. |
+| `timeline.toSVG()` | Returns the view as a standalone SVG document (a string), as it looks on screen. The view must be rendered and visible. Saving it is up to the host page; see [examples/export.html](examples/export.html). |
 | `timeline.moveEntry(timeline_id, task_id, patch)` | Moves an entry, as a drop does. Takes the PATCH body below, without `version`. |
 | `timeline.on("entry_moved" \| "move_failed", handler)` | Subscribes to events. Returns an unsubscribe function. |
 | `new timeline.TimelineView(container, options)` | Separate instance, for more than one view on a page. Same methods. |
