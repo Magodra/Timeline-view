@@ -68,6 +68,7 @@ const EVENT_PROPS = {
   marker_moved: "onMarkerMoved",
   entry_added: "onEntryAdded",
   entry_removed: "onEntryRemoved",
+  entry_draggable_changed: "onEntryDraggableChanged",
   timeline_moved: "onTimelineMoved",
   task_removed: "onTaskRemoved",
   task_updated: "onTaskUpdated",

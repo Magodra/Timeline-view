@@ -2,7 +2,23 @@
 
 All notable changes to `ar-timeline-view`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 1.1.1
+
+## Unreleased
+
+### Added
+
+- **More content templates.** `timeline.templates.milestone_text`, `callout_text` and `marker_text` give the content of those labels, like `task_text`. The task templates, `task_text` included, get the task's entry as a fourth argument, for example to show which items are pinned.
+- **Your own tooltips.** `tooltip_text` and `tooltip_class` replace the browser's tooltip with one the view draws, for task bars, milestones, callouts and marker labels.
+- **Pinning.** `draggable: false` on an entry or marker stops the user dragging it. `setEntryDraggable()` and `setMarkerDraggable()` change it later, and it is saved with a REST backend. New event `entry_draggable_changed`. `addEntry()` takes `draggable: false` to add an entry pinned. See `examples/pins.html`, and "Pin dropped items" in `examples/add.html`.
+- **Callout layers.** `addCalloutLayer(layer)` draws your own elements on the bar's edge, and `getCalloutPosition(task, timeline, from?, to?)` gives the position of a callout's bar or milestone symbol.
+- **Drag state.** `isDragging()` tells whether the user is dragging an entry or a marker label. New events `dragging_started` and `dragging_ended` (with `dropped`) mark the start and end of a drag; in React, `onDraggingStarted` and `onDraggingEnded`.
+- **Timeline clicks in the basic example.** `examples/basic.html` now also reports clicks on a timeline, with `onTimelineClick`.
+
+## 1.2.1
+
+- **Image links** in README.md modified. 
+
+## 1.2.0
 
 ### Added
 
@@ -13,7 +29,6 @@ All notable changes to `ar-timeline-view`. The format follows [Keep a Changelog]
 - **Custom content in task bars.** `timeline.templates.task_text` returns HTML or a DOM node for a task's bar. Buttons, links and form fields in a bar work without starting a drag. `escapeHtml()` makes untrusted text safe to include.
 - **Task layers.** `addTaskLayer(layer)` draws your own elements on the bars, under the task bars. `getTaskPosition(task, timeline, from?, to?)` returns `{ left, right, top, height, width }` in CSS pixels for placing them.
 - **Custom task attributes.** Attributes on a task that the view doesn't know are kept, returned by `serialize()`, passed to task layers, and can be changed with `updateTask()`.
-- **Drag state.** `isDragging()` tells whether the user is dragging an entry or a marker label. New events `dragging_started` and `dragging_ended` (with `dropped`) mark the start and end of a drag; in React, `onDraggingStarted` and `onDraggingEnded`.
 
 ## 1.1.0
 

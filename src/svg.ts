@@ -272,6 +272,12 @@ function drawCalloutArea(out: SvgWriter, area: HTMLElement): void {
     );
   };
 
+  // The host's callout layers, as plain rectangles, under the callouts.
+  for (const layer of area.querySelectorAll<HTMLElement>(".tlv-layer")) {
+    const color = getComputedStyle(layer).backgroundColor;
+    if (isVisible(color)) out.rect(out.box(layer), color);
+  }
+
   for (const box of area.querySelectorAll<HTMLElement>(".tlv-marker-label")) {
     drawConnector(box, box.previousElementSibling as HTMLElement);
     drawLabelBox(out, box);

@@ -61,11 +61,15 @@ export interface Marker {
   color?: string;
   /** Label position; `y ≤ 0` above the topmost bar, `y > 0` below the bottommost. */
   offset: Offset;
+  /** Whether the user can drag the label. */
+  draggable: boolean;
 }
 
-export type Entry =
+/** `draggable: false` pins the entry against the user's dragging; left out when it isn't pinned. */
+export type Entry = (
   | { taskId: Id; placement: "on"; line: number }
-  | { taskId: Id; placement: "above" | "below"; calloutOffset: Offset };
+  | { taskId: Id; placement: "above" | "below"; calloutOffset: Offset }
+) & { draggable?: false };
 
 export interface Timeline {
   id: Id;
@@ -83,6 +87,7 @@ export interface MovePatch {
   line?: number;
   newLine?: boolean;
   calloutOffset?: Offset;
+  draggable?: boolean;
 }
 
 /** Where `addEntry` puts a task: a timeline, and optionally the move fields for the spot on it. */
@@ -92,6 +97,7 @@ export interface AddTarget {
   line?: number;
   newLine?: boolean;
   calloutOffset?: Offset;
+  draggable?: boolean;
 }
 
 export interface AddResult {
@@ -123,7 +129,7 @@ const SCALES: readonly Scale[] = ["hour", "day", "week", "month", "year"];
 const SYMBOLS: readonly MilestoneSymbol[] = ["diamond", "circle", "square", "triangle", "star"];
 const SYMBOL_LIST = "use diamond, circle, square, triangle or star";
 const TIMELINE_PATCH_FIELDS: readonly (keyof TimelineUpdateData)[] = ["name", "start_date", "finish_date"];
-const MARKER_PATCH_FIELDS: readonly (keyof MarkerPatchData)[] = ["text", "date", "color", "global", "marker_offset"];
+const MARKER_PATCH_FIELDS: readonly (keyof MarkerPatchData)[] = ["text", "date", "color", "global", "marker_offset", "draggable"];
 
 /** Runs a data check, turning its error into a `MoveError` (`invalid`), as a REST 422. */
 function asInvalid<T>(check: () => T): T {
@@ -276,12 +282,14 @@ export class TimelineModel {
   private entryFromData(timelineId: Id, e: TaskEntryData): Entry {
     const where = `Timeline ${timelineId}, task ${e.task}`;
     if (!this.findTask(e.task)) throw new Error(`${where}: unknown task`);
+    if (e.draggable !== undefined && typeof e.draggable !== "boolean") throw new Error(`${where}: draggable must be true or false`);
+    const pinned = e.draggable === false ? ({ draggable: false } as const) : {};
 
     // No callout_offset: on the bar, line 0 unless given.
     if (e.callout_offset === undefined) {
       const line = e.line ?? 0;
       if (!isLineIndex(line)) throw new Error(`${where}: line must be a whole number ≥ 0`);
-      return { taskId: e.task, placement: "on", line };
+      return { taskId: e.task, placement: "on", line, ...pinned };
     }
 
     // A callout: y > 0 is below the bar, y ≤ 0 above it.
@@ -289,7 +297,7 @@ export class TimelineModel {
     const offset = e.callout_offset;
     if (!isOffset(offset)) throw new Error(`${where}: callout_offset needs numeric x and y`);
     const placement = offset.y > 0 ? "below" : "above";
-    return { taskId: e.task, placement, calloutOffset: { x: offset.x, y: offset.y === 0 ? 0 : offset.y } };
+    return { taskId: e.task, placement, calloutOffset: { x: offset.x, y: offset.y === 0 ? 0 : offset.y }, ...pinned };
   }
 
   findTask(id: Id): Task | undefined {
@@ -416,6 +424,15 @@ export class TimelineModel {
     const index = source.entries.findIndex((e) => sameId(e.taskId, taskId));
     if (index < 0) throw new MoveError("not_found", `Task ${taskId} is not on timeline ${timelineId}`);
     const entry = source.entries[index];
+    if (patch.draggable !== undefined && typeof patch.draggable !== "boolean") {
+      throw new MoveError("invalid", "draggable must be true or false");
+    }
+    // Only pinning or unpinning: nothing moves, so nothing is trimmed.
+    if (patch.draggable !== undefined && Object.keys(patch).length === 1) {
+      if (patch.draggable) delete entry.draggable;
+      else entry.draggable = false;
+      return [source];
+    }
 
     const target = patch.timelineId === undefined ? source : this.findTimeline(patch.timelineId);
     if (!target) throw new MoveError("not_found", `Timeline ${patch.timelineId} not found`);
@@ -428,6 +445,7 @@ export class TimelineModel {
       line: target === source && entry.placement === "on" ? entry.line : 0,
       offset: (side) => keptOffset(entry, side),
     });
+    if (!(patch.draggable ?? entry.draggable ?? true)) moved.draggable = false;
 
     if (target === source) {
       source.entries[index] = moved;
@@ -473,7 +491,11 @@ export class TimelineModel {
 
     const offset = target.calloutOffset;
     const placement = target.placement ?? (offset === undefined ? "on" : isOffset(offset) && offset.y > 0 ? "below" : "above");
+    if (target.draggable !== undefined && typeof target.draggable !== "boolean") {
+      throw new MoveError("invalid", "draggable must be true or false");
+    }
     const entry = placeEntry(timeline, found.id, placement, target, { line: 0, offset: defaultOffset });
+    if (target.draggable === false) entry.draggable = false;
     if (created) this.tasks.push(found);
     timeline.entries.push(entry);
     trimLines(timeline, this.view.compactLines);
@@ -807,6 +829,7 @@ function markerFromData(mk: MarkerData): Marker {
   if (mk.color !== undefined && (typeof mk.color !== "string" || !isColor(mk.color))) {
     throw new Error(`${where}: color must be a CSS color`);
   }
+  if (mk.draggable !== undefined && typeof mk.draggable !== "boolean") throw new Error(`${where}: draggable must be true or false`);
   const offset = mk.marker_offset ?? DEFAULT_MARKER_OFFSET;
   if (!isOffset(offset)) throw new Error(`${where}: marker_offset needs numeric x and y`);
   return {
@@ -816,6 +839,7 @@ function markerFromData(mk: MarkerData): Marker {
     global: mk.global ?? false,
     color: mk.color,
     offset: { x: offset.x, y: offset.y === 0 ? 0 : offset.y },
+    draggable: mk.draggable ?? true,
   };
 }
 
@@ -827,6 +851,7 @@ export function markerToData(mk: Marker): MarkerData {
     ...(mk.global && { global: true }),
     ...(mk.color !== undefined && { color: mk.color }),
     marker_offset: { ...mk.offset },
+    ...(!mk.draggable && { draggable: false }),
   };
 }
 
@@ -878,7 +903,8 @@ export function taskToData(t: Task): TaskData {
 
 /** One task entry in the data format: `line` on the bar, or `callout_offset` for a callout. */
 export function entryToData(e: Entry): TaskEntryData {
-  return e.placement === "on" ? { task: e.taskId, line: e.line } : { task: e.taskId, callout_offset: { ...e.calloutOffset } };
+  const pinned = e.draggable === false ? { draggable: false } : {};
+  return e.placement === "on" ? { task: e.taskId, line: e.line, ...pinned } : { task: e.taskId, callout_offset: { ...e.calloutOffset }, ...pinned };
 }
 
 export function timelineToData(t: Timeline): TimelineData {
@@ -903,6 +929,7 @@ export function addTargetFromData(timelineId: Id, t: AddEntryPlaceData): AddTarg
     ...(t.line !== undefined && { line: t.line }),
     ...(t.new_line !== undefined && { newLine: t.new_line }),
     ...(t.callout_offset !== undefined && { calloutOffset: t.callout_offset }),
+    ...(t.draggable !== undefined && { draggable: t.draggable }),
   };
 }
 
@@ -913,5 +940,6 @@ export function patchFromData(p: MovePatchData): MovePatch {
     ...(p.line !== undefined && { line: p.line }),
     ...(p.new_line !== undefined && { newLine: p.new_line }),
     ...(p.callout_offset !== undefined && { calloutOffset: p.callout_offset }),
+    ...(p.draggable !== undefined && { draggable: p.draggable }),
   };
 }

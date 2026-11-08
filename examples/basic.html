@@ -10,7 +10,7 @@
 </head>
 <body>
     <h1>Basic timeline</h1>
-    <p>Drag the task bar between lines, or drag the milestone label anywhere above or below the bar. The label areas grow to fit. Click a task or label to see the click event and select it; Ctrl+Click selects several. Untick "Selection" to turn selection off.</p>
+    <p>Drag the task bar between lines, or drag the milestone label anywhere above or below the bar. The label areas grow to fit. Click a task, a label or the timeline itself to see the click event and select it; Ctrl+Click selects several. Untick "Selection" to turn selection off.</p>
     <p class="controls">
         <label><input type="checkbox" id="show_dates" checked> Show start and finish dates</label>
         <label><input type="checkbox" id="selection" checked> Selection</label>
@@ -53,12 +53,19 @@
             const task = this.serialize().tasks.find((t) => t.id === id);
             document.getElementById("clicked").textContent = `You've just clicked "${task.text}" (id=${id}).`;
         };
+        const showTimelineClick = function (id, e) {
+            const line = this.serialize().timelines.find((t) => t.id === id);
+            document.getElementById("clicked").textContent = `You've just clicked timeline "${line.name}" (id=${id}).`;
+        };
         let clickEventId = timeline.attachEvent("onTaskClick", showClick);
+        let timelineClickEventId = timeline.attachEvent("onTimelineClick", showTimelineClick);
         document.getElementById("click_events").addEventListener("change", (e) => {
             if (e.target.checked) {
                 clickEventId = timeline.attachEvent("onTaskClick", showClick);
+                timelineClickEventId = timeline.attachEvent("onTimelineClick", showTimelineClick);
             } else {
                 timeline.detachEvent(clickEventId);
+                timeline.detachEvent(timelineClickEventId);
                 document.getElementById("clicked").textContent = "Clicks are not reported.";
             }
         });

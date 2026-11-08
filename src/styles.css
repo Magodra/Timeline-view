@@ -1021,3 +1021,27 @@
     --tlv-selected-bg: rgba(76, 141, 255, 0.1);
   }
 }
+
+/* A pinned entry or marker label (draggable: false): clickable, but it can't be dragged. */
+.tlv .tlv-pinned {
+  cursor: default;
+  touch-action: auto;
+}
+
+/* The content of a callout_text or marker_text template, in place of the name and date. */
+.tlv-callout-title--custom {
+  font-weight: inherit;
+}
+
+/* The view's own tooltip, with a tooltip_text or tooltip_class template. */
+.tlv-tooltip {
+  position: fixed;
+  z-index: 1001;
+  max-width: 320px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--tlv-bg);
+  background: var(--tlv-text);
+  font-size: 12px;
+  pointer-events: none;
+}

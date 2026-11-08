@@ -93,6 +93,8 @@ export interface TaskEntryData {
   line?: number;
   /** Makes the entry a callout, and places its label (see `Offset`). */
   callout_offset?: Offset;
+  /** `false` pins the entry: the user can't drag it (it can still be clicked, and moved from code). Default: `true`. */
+  draggable?: boolean;
 }
 
 /** Shows a (non-global) marker on this timeline. */
@@ -122,6 +124,8 @@ export interface MarkerData {
    * the bottommost. Default: `{ x: 0, y: -16 }`.
    */
   marker_offset?: Offset;
+  /** `false` pins the label: the user can't drag it. Default: `true`. */
+  draggable?: boolean;
 }
 
 export interface TimelineData {
@@ -157,6 +161,17 @@ export interface TaskPosition {
   width: number;
 }
 
+/** Where a callout's marker sits on the bar's edge: what `getCalloutPosition` returns. CSS pixels, relative to the callout area (`.tlv-area`, where callout layers are placed). */
+export interface CalloutPosition extends TaskPosition {
+  /** Which side of the bar the callout is on. */
+  placement: "above" | "below";
+}
+
+/** The templates that give an element's content instead of its default text. */
+export type ContentTemplate = "task_text" | "milestone_text" | "callout_text" | "marker_text";
+/** Which kind of item a tooltip is for. */
+export type TooltipKind = "task" | "milestone" | "callout" | "marker";
+
 /** A class template for something showing a task: its start and finish, and the task's data with any custom attributes. */
 export type TaskClassTemplate = (start: Date, end: Date, task: TaskData) => string;
 /** A class template for part of a timeline: the timeline's range and its data. */
@@ -171,9 +186,25 @@ export interface TimelineTemplates {
   /**
    * The content of a task's bar (`.tlv-task-label`): an HTML string, or a DOM
    * node. Default: the task's text. A string is inserted as HTML, so escape
-   * anything that isn't trusted (`escapeHtml`).
+   * anything that isn't trusted (`escapeHtml`). `entry` is the task's entry
+   * on the timeline being drawn, for example to see if it is pinned.
    */
-  task_text?: (start: Date, end: Date, task: TaskData) => string | Node;
+  task_text?: (start: Date, end: Date, task: TaskData, entry: TaskEntryData) => string | Node;
+  /** The content of a milestone's label (`.tlv-milestone-label`), as `task_text`. */
+  milestone_text?: (start: Date, end: Date, task: TaskData, entry: TaskEntryData) => string | Node;
+  /** The content of a callout's label, in place of its name and dates, as `task_text`. */
+  callout_text?: (start: Date, end: Date, task: TaskData, entry: TaskEntryData) => string | Node;
+  /** The content of a marker's label, in place of its text and date, as `task_text`. `start` and `end` are its date. */
+  marker_text?: (start: Date, end: Date, marker: MarkerData) => string | Node;
+  /**
+   * The tooltip of a task bar, milestone, callout or marker label: an HTML
+   * string or a DOM node (as `task_text`, so escape untrusted text), or `""`
+   * or `null` for none. With this or `tooltip_class` set, the view draws its
+   * own tooltip (`.tlv-tooltip`) instead of the browser's.
+   */
+  tooltip_text?: (start: Date, end: Date, item: TaskData | MarkerData, kind: TooltipKind) => string | Node | null;
+  /** Extra classes for the tooltip (`.tlv-tooltip`). */
+  tooltip_class?: (start: Date, end: Date, item: TaskData | MarkerData, kind: TooltipKind) => string;
   /** A task's bar on a bar line (`.tlv-task`). */
   task_class?: TaskClassTemplate;
   /** The text in a task's bar (`.tlv-task-label`). */
@@ -243,6 +274,8 @@ export interface MovePatchData {
   /** With placement `on`: insert a new bar line at `line` (0 to one past the last line); lines from there down shift by one. */
   new_line?: boolean;
   callout_offset?: Offset;
+  /** Pins (`false`) or unpins (`true`) the entry. Left out, it stays as it is. */
+  draggable?: boolean;
 }
 
 /**
@@ -259,6 +292,8 @@ export interface EntryTargetData {
   new_line?: boolean;
   /** Callout label position, with placement `above` or `below`. */
   callout_offset?: Offset;
+  /** For `addEntry`: `false` adds the entry pinned. */
+  draggable?: boolean;
 }
 
 /** Where an added entry goes on its timeline: an `EntryTargetData` without `timeline_id`. */
@@ -302,6 +337,7 @@ export interface MarkerPatchData {
   color?: string | null;
   global?: boolean;
   marker_offset?: Offset;
+  draggable?: boolean;
 }
 
 /** Response of a successful marker add or update. */

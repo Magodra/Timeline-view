@@ -209,6 +209,9 @@ export function attachDrag(
     const rect = source.getBoundingClientRect();
     const grab = { x: down.clientX - rect.left, y: down.clientY - rect.top };
     const isCalloutSource = source.classList.contains("tlv-callout");
+    // A pinned entry or label can be clicked, but not dragged.
+    const pinned = source.classList.contains("tlv-pinned");
+    let pinnedMoved = false;
     // A marker's label can only sit at one end of its line: above the topmost
     // bar or below the bottommost. Its drop target is that area.
     const marker = source.dataset.marker;
@@ -232,6 +235,10 @@ export function attachDrag(
     const onMove = (move: PointerEvent) => {
       if (!ghost) {
         if (Math.hypot(move.clientX - down.clientX, move.clientY - down.clientY) < DRAG_THRESHOLD) return;
+        if (pinned) {
+          pinnedMoved = true; // like a drag, it isn't a click
+          return;
+        }
         ghost = source.cloneNode(true) as HTMLElement;
         ghost.classList.add("tlv-ghost");
         ghost.removeAttribute("data-entry");
@@ -259,7 +266,7 @@ export function attachDrag(
       cleanup?.();
       // Released without moving past the drag threshold: a click.
       if (up && !wasDrag) {
-        onClick?.(source, up);
+        if (!pinnedMoved) onClick?.(source, up);
         return;
       }
       if (!wasDrag) return;

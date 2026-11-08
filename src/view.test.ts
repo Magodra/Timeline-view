@@ -1960,3 +1960,231 @@ describe("task_text template", () => {
     expect(escapeHtml(`<b a="1">&'`)).toBe("&#60;b a=&#34;1&#34;&#62;&#38;&#39;");
   });
 });
+
+describe("text and tooltip templates", () => {
+  const withMarker = () => ({
+    ...sample(),
+    tasks: [...sample().tasks, { id: 3, text: "Flag", start_date: "2026-04-20" }],
+    timelines: [{ ...sample().timelines[0], entries: [...sample().timelines[0].entries, { task: 3, line: 0 }, { marker: 1 }] }],
+    markers: [{ id: 1, text: "Today", date: "2026-03-20" }],
+  });
+  const pointer = (type: string, target: EventTarget, x = 10) => {
+    const Pointer = (globalThis.PointerEvent ?? MouseEvent) as typeof MouseEvent;
+    target.dispatchEvent(new Pointer(type, { bubbles: true, button: 0, clientX: x }));
+  };
+
+  it("replaces milestone, callout and marker text, and exports the plain text", () => {
+    const view = new TimelineView("tl");
+    view.templates.milestone_text = () => "<b>M</b>";
+    view.templates.callout_text = () => "<i>C</i>";
+    view.templates.marker_text = (_s, _e, marker) => `<u>${marker.text}!</u>`;
+    view.parse(withMarker());
+    expect(container.querySelector(".tlv-milestone-label b")!.textContent).toBe("M");
+    expect(container.querySelector(".tlv-callout i")!.textContent).toBe("C");
+    expect(container.querySelector(".tlv-callout .tlv-callout-dates")).toBeNull();
+    expect(container.querySelector(".tlv-marker-label u")!.textContent).toBe("Today!");
+    const svg = view.toSVG();
+    expect(svg).toContain("Milestone #1");
+    expect(svg).not.toContain("<i>");
+  });
+
+  it("keeps the browser's tooltip without tooltip templates", () => {
+    new TimelineView("tl").parse(sample());
+    expect(container.querySelector<HTMLElement>(".tlv-task")!.title).toContain("Task #1");
+    pointer("pointermove", container.querySelector(".tlv-task")!);
+    expect(container.querySelector(".tlv-tooltip")).toBeNull();
+  });
+
+  it("draws its own tooltip from the templates, and hides it", () => {
+    const view = new TimelineView("tl");
+    const kinds: string[] = [];
+    view.templates.tooltip_text = (_s, _e, item, kind) => {
+      kinds.push(kind);
+      return kind === "milestone" ? "" : `<b>${String(item.text)}</b>`;
+    };
+    view.templates.tooltip_class = (_s, _e, _item, kind) => `tip-${kind}`;
+    view.parse(withMarker());
+    const bar = container.querySelector<HTMLElement>(".tlv-task")!;
+    expect(bar.title).toBe("");
+    pointer("pointermove", bar);
+    const tip = container.querySelector(".tlv-tooltip")!;
+    expect(tip.querySelector("b")!.textContent).toBe("Task #1");
+    expect(tip.classList.contains("tip-task")).toBe(true);
+    pointer("pointermove", container.querySelector(".tlv-marker-label")!);
+    expect(container.querySelector(".tlv-tooltip.tip-marker b")!.textContent).toBe("Today");
+    pointer("pointermove", container.querySelector(".tlv-milestone")!);
+    expect(container.querySelector(".tlv-tooltip")).toBeNull(); // "" means none
+    pointer("pointermove", bar);
+    pointer("pointerdown", bar);
+    expect(container.querySelector(".tlv-tooltip")).toBeNull();
+    pointer("pointermove", bar);
+    expect(container.querySelector(".tlv-tooltip")).toBeNull(); // not again until the pointer leaves it
+    pointer("pointerup", window);
+    expect(kinds).toEqual(["task", "marker", "milestone", "task"]);
+  });
+
+  it("uses the default text with only tooltip_class", () => {
+    const view = new TimelineView("tl");
+    view.templates.tooltip_class = () => "mine";
+    view.parse(sample());
+    pointer("pointermove", container.querySelector(".tlv-callout")!);
+    expect(container.querySelector(".tlv-tooltip.mine")!.textContent).toContain("Milestone #1");
+  });
+});
+
+describe("pinning (draggable: false)", () => {
+  const pinnedData = () => {
+    const data = sample();
+    data.timelines[0].entries = [{ task: 1, line: 1, draggable: false }, { task: 2, callout_offset: { x: 30, y: 16 } }];
+    data.markers = [{ id: 1, text: "Today", date: "2026-03-20", global: true, draggable: false }];
+    return data;
+  };
+  const Pointer = (globalThis.PointerEvent ?? MouseEvent) as typeof MouseEvent;
+  const press = (node: Element, to: number) => {
+    node.dispatchEvent(new Pointer("pointerdown", { bubbles: true, button: 0, clientX: 10 }));
+    window.dispatchEvent(new Pointer("pointermove", { bubbles: true, button: 0, clientX: to }));
+    window.dispatchEvent(new Pointer("pointerup", { bubbles: true, button: 0, clientX: to }));
+  };
+
+  it("keeps draggable in the data, only when false", () => {
+    const view = new TimelineView("tl");
+    view.parse(pinnedData());
+    const out = view.serialize();
+    expect(out.timelines[0].entries[0]).toEqual({ task: 1, line: 1, draggable: false });
+    expect(out.timelines[0].entries[1]).toEqual({ task: 2, callout_offset: { x: 30, y: 16 } });
+    expect(out.markers![0].draggable).toBe(false);
+  });
+
+  it("rejects a draggable that isn't a boolean", () => {
+    const data = sample();
+    (data.timelines[0].entries[0] as TaskEntryData).draggable = "no" as never;
+    expect(() => new TimelineView("tl").parse(data)).toThrow(/draggable/);
+  });
+
+  it("doesn't drag a pinned entry or marker, but still clicks it", () => {
+    const view = new TimelineView("tl");
+    view.parse(pinnedData());
+    const started = vi.fn();
+    const clicked = vi.fn();
+    view.on("dragging_started", started);
+    view.attachEvent("onTaskClick", clicked);
+    const bar = container.querySelector(".tlv-task")!;
+    expect(bar.classList.contains("tlv-pinned")).toBe(true);
+    press(bar, 80);
+    press(container.querySelector(".tlv-marker-label")!, 80);
+    expect(started).not.toHaveBeenCalled();
+    expect(clicked).not.toHaveBeenCalled(); // a press that moved is no click
+    press(bar, 10);
+    expect(clicked).toHaveBeenCalledOnce();
+  });
+
+  it("pins and unpins with setEntryDraggable and setMarkerDraggable", async () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const changed = vi.fn();
+    view.on("entry_draggable_changed", changed);
+    await expect(view.setEntryDraggable(1, 2, false)).resolves.toBe(true);
+    expect(changed).toHaveBeenCalledWith({ timeline_id: 1, task_id: 2, draggable: false, entry: { task: 2, callout_offset: { x: 30, y: 16 }, draggable: false } });
+    expect(container.querySelector(".tlv-callout")!.classList.contains("tlv-pinned")).toBe(true);
+    await expect(view.setEntryDraggable(1, 2, false)).resolves.toBe(false);
+    await expect(view.setEntryDraggable(1, 2, true)).resolves.toBe(true);
+    expect(container.querySelector(".tlv-callout")!.classList.contains("tlv-pinned")).toBe(false);
+    await expect(view.setEntryDraggable(1, 99, false)).rejects.toMatchObject({ code: "not_found" });
+
+    view.parse(pinnedData());
+    await view.setMarkerDraggable(1, true);
+    expect(view.serialize().markers![0].draggable).toBeUndefined();
+  });
+
+  it("stays pinned when moved from code, and doesn't trim on pinning alone", async () => {
+    const view = new TimelineView("tl");
+    const data = pinnedData();
+    data.view.compact_lines = true;
+    data.timelines[0].entries[0] = { task: 1, line: 3, draggable: false };
+    view.parse(data);
+    await view.setEntryDraggable(1, 1, true);
+    expect(view.serialize().timelines[0].entries[0]).toEqual({ task: 1, line: 3 });
+    await view.setEntryDraggable(1, 1, false);
+    await view.moveEntry(1, 1, { line: 0 });
+    expect(view.serialize().timelines[0].entries[0]).toEqual({ task: 1, line: 0, draggable: false });
+  });
+
+  it("adds a pinned entry", async () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    await view.addEntry({ id: 9, text: "New", start_date: "2026-04-02" }, { timeline_id: 1, draggable: false });
+    expect(view.serialize().timelines[0].entries.at(-1)).toMatchObject({ task: 9, draggable: false });
+  });
+
+  it("saves a pin with the entry's PATCH, and rolls it back on failure", async () => {
+    const fetch = vi.fn(async () => json(500, {}));
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(sample());
+    const failed = vi.fn();
+    view.on("save_failed", failed);
+    await expect(view.setEntryDraggable(1, 2, false)).rejects.toBeDefined();
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://api.test/views/v1/timelines/1/entries/2");
+    expect(JSON.parse(init.body as string)).toEqual({ draggable: false, version: 7 });
+    expect(failed.mock.calls[0][0]).toMatchObject({ action: "set_entry_draggable" });
+    expect((view.serialize().timelines[0].entries[1] as TaskEntryData).draggable).toBeUndefined();
+  });
+});
+
+describe("callout layers and getCalloutPosition", () => {
+  const box = (left: number, top: number, width: number, height: number) =>
+    ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top }) as DOMRect;
+
+  it("measures the marker on the bar's edge, or a date span", () => {
+    const view = new TimelineView("tl");
+    const data = sample();
+    data.tasks[0].duration = "2d";
+    data.timelines[0].entries = [{ task: 1, callout_offset: { x: 0, y: 16 } }, { task: 2, callout_offset: { x: 0, y: 16 } }];
+    view.parse(data);
+    const area = container.querySelector<HTMLElement>(".tlv-area--below")!;
+    area.getBoundingClientRect = () => box(100, 200, 610, 40);
+    area.querySelector<HTMLElement>('[data-edge="1"]')!.getBoundingClientRect = () => box(400, 200, 20, 6);
+    expect(view.getCalloutPosition(1, 1)).toEqual({ left: 300, right: 290, top: 0, height: 6, width: 20, placement: "below" });
+    expect(view.getCalloutPosition(1, 1, "2026-03-02", "2026-03-04")).toEqual({ left: 10, right: 580, top: 0, height: 6, width: 20, placement: "below" });
+    expect(view.getCalloutPosition(99, 1)).toBeNull();
+  });
+
+  it("gives null for a task on the bar", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    expect(view.getCalloutPosition(1, 1)).toBeNull();
+  });
+
+  it("draws layers in the callout's area only, and removes them", () => {
+    container.getClientRects = () => [box(0, 0, 1000, 300)] as unknown as DOMRectList;
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const seen: unknown[] = [];
+    const id = view.addCalloutLayer((task, timeline) => {
+      seen.push([task.id, timeline.id]);
+      return document.createElement("i");
+    });
+    expect(seen).toEqual([[2, 1]]);
+    expect(container.querySelector(".tlv-area--below > .tlv-layers > i.tlv-layer")).not.toBeNull();
+    expect(container.querySelector(".tlv-track .tlv-layer")).toBeNull();
+    expect(view.removeCalloutLayer(id)).toBe(true);
+    expect(container.querySelector(".tlv-layer")).toBeNull();
+    expect(view.removeCalloutLayer(id)).toBe(false);
+  });
+});
+
+describe("text templates and pinning", () => {
+  it("passes the entry to task_text, milestone_text and callout_text, and redraws when it is pinned", async () => {
+    const view = new TimelineView("tl");
+    const mark = (_s: Date, _e: Date, task: TaskData, entry: TaskEntryData) => `${entry.draggable === false ? "PIN " : ""}${String(task.text)}`;
+    view.templates.task_text = mark;
+    view.templates.callout_text = mark;
+    view.parse(sample());
+    const label = () => container.querySelector(".tlv-task-label")!.textContent;
+    expect(label()).toBe("Task #1");
+    await view.setEntryDraggable(1, 1, false);
+    expect(label()).toBe("PIN Task #1");
+    await view.setEntryDraggable(1, 2, false);
+    expect(container.querySelector(".tlv-callout-title")!.textContent).toBe("PIN Milestone #1");
+  });
+});

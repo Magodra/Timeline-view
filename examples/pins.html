@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Timeline view - pins, text templates and callout layers</title>
+    <script src="../dist/timelineview.js"></script>
+    <link href="../dist/timelineview.css" rel="stylesheet">
+    <link href="examples.css" rel="stylesheet">
+    <style>
+        .tlv-tooltip.important { background: #cf222e; color: white; }
+        /* A pinned item, marked with the class the view adds. */
+        .tlv-pinned.tlv-task { outline: 2px dashed #8250df; outline-offset: 1px; }
+        .tlv-callout.tlv-pinned, .tlv-marker-label.tlv-pinned { border-style: dashed; }
+        /* Drawn by the callout layer: a band over the marker on the bar's edge. */
+        .edge-band { background: rgba(130, 80, 223, 0.35); }
+    </style>
+</head>
+<body>
+    <h1>Pins, text templates and callout layers</h1>
+    <p>
+        Click a task bar, milestone, callout or marker label, then use the checkbox to pin or unpin it
+        (<code>setEntryDraggable</code>, <code>setMarkerDraggable</code>). A pinned item shows 📌, drawn by the
+        <code>_text</code> templates, and can't be dragged. Some items are pinned in the data with
+        <code>draggable: false</code>.
+        Hover anything for a tooltip from <code>tooltip_text</code> and <code>tooltip_class</code>. The labels come
+        from <code>milestone_text</code>, <code>callout_text</code> and <code>marker_text</code>. The purple band on the
+        bar's edge is a callout layer, placed with <code>getCalloutPosition</code>.
+    </p>
+    <p class="controls">
+        <label><input type="checkbox" id="pinned" disabled> Pinned</label>
+        <span id="picked">Nothing selected.</span>
+    </p>
+    <div id="timeline_here"></div>
+    <script>
+        const esc = timeline.escapeHtml;
+        const days = (start, end) => Math.round((end - start) / 86400000);
+
+        // Pinning is per entry, so the task templates get the entry as a fourth argument. A marker has it itself.
+        const pin = (item) => (item.draggable === false ? "📌 " : "");
+        timeline.templates.task_text = (start, end, task, entry) => pin(entry) + esc(task.text);
+        timeline.templates.milestone_text = (start, end, task, entry) => `${pin(entry)}&#9733; ${esc(task.text)}`;
+        timeline.templates.callout_text = (start, end, task, entry) =>
+            `${pin(entry)}<strong>${esc(task.text)}</strong><br>${days(start, end)} days`;
+        timeline.templates.marker_text = (start, end, marker) => `${pin(marker)}<em>${esc(marker.text)}</em>`;
+        timeline.templates.tooltip_text = (start, end, item, kind) =>
+            `<strong>${esc(item.text)}</strong> (${kind})<br>${start.toISOString().slice(0, 10)}`;
+        timeline.templates.tooltip_class = (start, end, item) => (item.important ? "important" : "");
+
+        const view = timeline.init("timeline_here");
+        timeline.parse({
+            view: { name: "Release plan", scale: "week" },
+            tasks: [
+                { id: 1, text: "Build", start_date: "2026-03-09", duration: "3w", important: true },
+                { id: 2, text: "Test", start_date: "2026-03-30", duration: "2w" },
+                { id: 3, text: "Launch", start_date: "2026-04-20" },
+                { id: 4, text: "Sign-off", start_date: "2026-04-13" }
+            ],
+            timelines: [
+                { id: 1, name: "Team", start_date: "2026-03-02", finish_date: "2026-05-04", entries: [
+                    { task: 1, line: 0, draggable: false },
+                    { task: 3, line: 1 },
+                    { task: 2, callout_offset: { x: -40, y: -24 } },
+                    { task: 4, callout_offset: { x: 20, y: 24 }, draggable: false },
+                    { marker: "today" }
+                ]}
+            ],
+            markers: [{ id: "today", text: "Today", date: "2026-03-23", draggable: false }]
+        });
+
+        timeline.addCalloutLayer(function (task, line) {
+            const position = this.getCalloutPosition(task, line);
+            if (!position) return false;
+            const band = document.createElement("div");
+            band.className = "edge-band";
+            band.style.left = position.left - 3 + "px";
+            band.style.width = position.width + 6 + "px";
+            band.style.top = position.top - 3 + "px";
+            band.style.height = position.height + 6 + "px";
+            return band;
+        });
+
+        // What the checkbox applies to: one task entry, or a marker.
+        const checkbox = document.getElementById("pinned");
+        const pickedText = document.getElementById("picked");
+        let picked = null;
+        let clickedTimeline = null;
+
+        const refresh = () => {
+            const data = timeline.serialize();
+            const item = !picked ? null
+                : picked.marker !== undefined ? data.markers.find((m) => m.id === picked.marker)
+                : data.timelines.find((t) => t.id === picked.timeline).entries.find((e) => e.task === picked.task);
+            checkbox.disabled = !item;
+            checkbox.checked = !!item && item.draggable === false;
+            const name = !item ? "" : picked.marker !== undefined ? item.text : data.tasks.find((t) => t.id === picked.task).text;
+            pickedText.textContent = item ? `Selected: ${name}` : "Nothing selected.";
+        };
+
+        // onTaskClick comes first and says which timeline; a task can be on several.
+        timeline.attachEvent("onTaskClick", (task, event, line) => { clickedTimeline = line; });
+        timeline.attachEvent("onTaskSelected", (tasks) => {
+            picked = tasks.length === 1 ? { timeline: clickedTimeline, task: tasks[0] } : null;
+            refresh();
+        });
+        timeline.attachEvent("onTimelineSelected", (lines) => {
+            if (lines.length) { picked = null; refresh(); }
+        });
+        // Markers aren't part of the view's selection, so the page tracks the click on a label itself.
+        view.container.addEventListener("click", (e) => {
+            const label = e.target.closest(".tlv-marker-label");
+            if (!label) return;
+            timeline.clearSelection();
+            picked = { marker: timeline.serialize().markers.find((m) => String(m.id) === label.dataset.marker).id };
+            refresh();
+        });
+
+        checkbox.addEventListener("change", () => {
+            if (!picked) return;
+            const draggable = !checkbox.checked;
+            if (picked.marker !== undefined) timeline.setMarkerDraggable(picked.marker, draggable);
+            else timeline.setEntryDraggable(picked.timeline, picked.task, draggable);
+        });
+    </script>
+</body>
+</html>

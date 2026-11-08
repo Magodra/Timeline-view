@@ -1,3 +1,4 @@
+import { attachTooltip } from "./tooltip";
 import { ApiError, RestClient } from "./api";
 import {
   attachDrag,
@@ -39,7 +40,11 @@ import type {
   TaskData,
   TaskEntryData,
   TaskPatchData,
+  CalloutPosition,
+  ContentTemplate,
+  Placement,
   TaskPosition,
+  TooltipKind,
   TickFormatter,
   TimelineData,
   TimelineTemplates,
@@ -70,6 +75,12 @@ export interface TimelineOptions extends TimelineFormatters {
  * for none.
  */
 export type TaskLayer = (this: TimelineView, task: TaskData, timeline: TimelineData) => HTMLElement | false | null | undefined;
+
+/**
+ * Draws the host's own element for a callout, in its callout area at the
+ * bar's edge (see `addCalloutLayer`). Arguments as for a `TaskLayer`.
+ */
+export type CalloutLayer = TaskLayer;
 
 /** How the view writes dates and time-scale labels. Leave one out for the built-in format. */
 export interface TimelineFormatters {
@@ -281,6 +292,8 @@ export interface TimelineEvents {
   entry_added: EntryAddedEvent;
   /** A task was taken off a timeline with `removeEntry`. With a REST backend it is saved too. */
   entry_removed: EntryRemovedEvent;
+  /** An entry was pinned or unpinned with `setEntryDraggable`. With a REST backend it is saved too. */
+  entry_draggable_changed: EntryDraggableChangedEvent;
   /**
    * A timeline was moved in the stack (`moveTimeline`, `moveTimelineUp`,
    * `moveTimelineDown`). With a REST backend the new position is saved too.
@@ -338,6 +351,16 @@ function displayOf({ format_date, format_tick }: TimelineFormatters): Display {
   };
 }
 
+/** Payload of `entry_draggable_changed`. */
+export interface EntryDraggableChangedEvent {
+  timeline_id: Id;
+  task_id: Id;
+  /** `false`: the entry is now pinned. */
+  draggable: boolean;
+  /** The entry after the change. */
+  entry: TaskEntryData;
+}
+
 /** What a failed save was for. */
 export type SaveAction =
   | "rename_view"
@@ -348,6 +371,7 @@ export type SaveAction =
   | "remove_timeline"
   | "add_entry"
   | "remove_entry"
+  | "set_entry_draggable"
   | "update_task"
   | "remove_task"
   | "add_marker"
@@ -430,6 +454,9 @@ export class TimelineView {
   private display: Display = defaultDisplay;
   /** The host's task layers, by the id `addTaskLayer` returned. */
   private readonly layers = new Map<number, TaskLayer>();
+  /** The host's callout layers, by the id `addCalloutLayer` returned. */
+  private readonly calloutLayers = new Map<number, CalloutLayer>();
+  private readonly detachTooltip: () => void;
   private lastLayerId = 0;
   /** Whether the built-in controls are shown (the `controls` option). */
   private controls = false;
@@ -446,6 +473,7 @@ export class TimelineView {
     this.controls = options.controls === true;
     this.display = { ...displayOf(this.formatters), controls: this.controls };
     onLayout(node, () => this.drawLayers());
+    this.detachTooltip = attachTooltip(node, this.buildTooltip);
     node.addEventListener("click", this.onControlClick);
     node.addEventListener("keydown", this.onNameKey);
     node.addEventListener("focusout", this.onNameBlur);
@@ -513,6 +541,56 @@ export class TimelineView {
   }
 
   /**
+   * Where a callout's marker on the bar's edge (its short bar, or its
+   * milestone symbol) sits, in CSS pixels relative to the callout area
+   * (`.tlv-area`, where callout layers are placed), as the view is laid out
+   * now. `from` and `to` (a `Date` or a date string) replace the horizontal
+   * position with that date span on the bar, held at its edges. Returns null
+   * for an unknown task, a task that isn't a callout on that timeline, or a
+   * view that isn't shown.
+   */
+  getCalloutPosition(task: Id | TaskData, timeline: Id | TimelineData, from?: Date | string, to?: Date | string): CalloutPosition | null {
+    const model = this.model;
+    const found = model?.findTask(typeof task === "object" ? task.id : task);
+    const on = model?.findTimeline(typeof timeline === "object" ? timeline.id : timeline);
+    const entry = on?.entries.find((e) => found && String(e.taskId) === String(found.id));
+    if (!found || !on || !entry || entry.placement === "on") return null;
+    const area = [...this.container.querySelectorAll<HTMLElement>(".tlv-area")].find(
+      (n) => n.dataset.timeline === String(on.id) && n.dataset.placement === entry.placement,
+    );
+    const edge = area && [...area.children].find((n) => (n as HTMLElement).dataset.edge === String(found.id));
+    const box = area?.getBoundingClientRect();
+    if (!edge || !box || box.width === 0) return null;
+    const marker = edge.getBoundingClientRect();
+    const toDate = (date: Date | string) => (typeof date === "string" ? parseDate(date) : date);
+    const at = (date: Date) => Math.min(1, Math.max(0, fraction(date, on.start, on.finish))) * box.width;
+    const byDate = from !== undefined || to !== undefined;
+    const left = byDate ? at(from === undefined ? found.start : toDate(from)) : marker.left - box.left;
+    const width = byDate ? Math.max(0, at(to === undefined ? found.finish : toDate(to)) - left) : marker.width;
+    return { left, right: box.width - left - width, top: marker.top - box.top, height: marker.height, width, placement: entry.placement };
+  }
+
+  /**
+   * Adds a layer of the host's own elements to the callouts, drawn in the
+   * callout area at the bar's edge, under the callouts. Like `addTaskLayer`,
+   * but `layer` is called for each callout, and places its element with
+   * `getCalloutPosition`. Returns an id for `removeCalloutLayer`.
+   */
+  addCalloutLayer(layer: CalloutLayer): number {
+    const id = ++this.lastLayerId;
+    this.calloutLayers.set(id, layer);
+    layout(this.container);
+    return id;
+  }
+
+  /** Removes a layer added with `addCalloutLayer`. Returns false if the id is unknown. */
+  removeCalloutLayer(id: number): boolean {
+    const removed = this.calloutLayers.delete(id);
+    if (removed) layout(this.container);
+    return removed;
+  }
+
+  /**
    * Adds a layer of the host's own elements to the tasks, drawn on the bar
    * under the task bars. `layer` is called for each task on a bar line, once
    * per timeline it is on, with the task's data (with any custom attributes)
@@ -531,42 +609,47 @@ export class TimelineView {
   /** Removes a layer added with `addTaskLayer`. Returns false if the id is unknown. */
   removeTaskLayer(id: number): boolean {
     const removed = this.layers.delete(id);
-    if (removed) {
-      for (const node of this.container.querySelectorAll(".tlv-layers")) node.remove();
-      layout(this.container);
-    }
+    if (removed) layout(this.container);
     return removed;
   }
 
-  /** Draws the task layers; part of the view's layout, since they are placed in measured pixels. */
+  /** Draws the task and callout layers; part of the view's layout, since they are placed in measured pixels. */
   private drawLayers(): void {
+    for (const track of this.container.querySelectorAll<HTMLElement>(".tlv-track")) {
+      this.drawLayersIn(track, this.layers, "on");
+    }
+    for (const area of this.container.querySelectorAll<HTMLElement>(".tlv-area")) {
+      this.drawLayersIn(area, this.calloutLayers, area.dataset.placement as Placement);
+    }
+  }
+
+  /** Redraws one bar's or callout area's layers, for its entries with that placement. */
+  private drawLayersIn(parent: HTMLElement, layers: Map<number, TaskLayer>, placement: Placement): void {
     const model = this.model;
     if (!model) return;
-    for (const track of this.container.querySelectorAll<HTMLElement>(".tlv-track")) {
-      track.querySelector(":scope > .tlv-layers")?.remove();
-      const id = track.closest<HTMLElement>(".tlv-timeline")?.dataset.timeline;
-      const timeline = model.timelines.find((t) => String(t.id) === id);
-      if (!timeline || this.layers.size === 0) continue;
-      const timelineData = timelineToData(timeline);
-      const holder = document.createElement("div");
-      holder.className = "tlv-layers";
-      for (const entry of timeline.entries) {
-        const task = entry.placement === "on" ? model.findTask(entry.taskId) : undefined;
-        if (!task) continue;
-        for (const layer of this.layers.values()) {
-          try {
-            const node = layer.call(this, taskToData(task), timelineData);
-            if (node) {
-              node.classList.add("tlv-layer");
-              holder.append(node);
-            }
-          } catch (error) {
-            console.error("timeline view: a task layer threw", error);
+    parent.querySelector(":scope > .tlv-layers")?.remove();
+    const id = parent.closest<HTMLElement>(".tlv-timeline")?.dataset.timeline;
+    const timeline = model.timelines.find((t) => String(t.id) === id);
+    if (!timeline || layers.size === 0) return;
+    const timelineData = timelineToData(timeline);
+    const holder = document.createElement("div");
+    holder.className = "tlv-layers";
+    for (const entry of timeline.entries) {
+      const task = entry.placement === placement ? model.findTask(entry.taskId) : undefined;
+      if (!task) continue;
+      for (const layer of layers.values()) {
+        try {
+          const node = layer.call(this, taskToData(task), timelineData);
+          if (node) {
+            node.classList.add("tlv-layer");
+            holder.append(node);
           }
+        } catch (error) {
+          console.error("timeline view: a layer threw", error);
         }
       }
-      track.prepend(holder);
     }
+    parent.prepend(holder);
   }
 
   /**
@@ -710,6 +793,14 @@ export class TimelineView {
    */
   setMarkerOffset(markerId: Id, offset: Offset): Promise<boolean> {
     return this.updateMarker(markerId, { marker_offset: offset });
+  }
+
+  /**
+   * Pins (`false`) or unpins (`true`) a marker's label: the same as
+   * `updateMarker(id, { draggable })`, and saved the same way.
+   */
+  setMarkerDraggable(markerId: Id, draggable: boolean): Promise<boolean> {
+    return this.updateMarker(markerId, { draggable });
   }
 
   /**
@@ -1276,6 +1367,34 @@ export class TimelineView {
   }
 
   /**
+   * Pins (`false`) or unpins (`true`) an entry: a task bar, milestone or
+   * callout on one timeline. A pinned entry can't be dragged by the user; it
+   * can still be clicked and selected, and changed from code. Fires
+   * `entry_draggable_changed`. Resolves to false, without the event, if it
+   * already is that way; rejects with a `MoveError` (`not_found`, `invalid`)
+   * without changing anything, and after a failed save. With a REST backend,
+   * saved with `PATCH .../timelines/{id}/entries/{task_id}` `{ draggable }`.
+   */
+  async setEntryDraggable(timelineId: Id, taskId: Id, draggable: boolean): Promise<boolean> {
+    const model = this.requireModel();
+    const current = model.findEntry(timelineId, taskId);
+    if (current && (current.draggable !== false) === draggable) return false;
+    const snapshot = model.toData();
+    const [timeline] = model.moveEntry(timelineId, taskId, { draggable });
+    const entry = model.findEntry(timeline.id, taskId)!;
+    this.render();
+    this.emit("entry_draggable_changed", { timeline_id: timeline.id, task_id: entry.taskId, draggable, entry: entryToData(entry) });
+    await this.saveChange(
+      snapshot,
+      "set_entry_draggable",
+      { timeline_id: timeline.id, task_id: entry.taskId },
+      (api, viewId, version) => api.moveEntry(viewId, timeline.id, entry.taskId, { draggable }, version),
+      this.takeTimelines,
+    );
+    return true;
+  }
+
+  /**
    * Takes a task off one timeline, and fires `entry_removed`. The task stays
    * in the data (on its other timelines, or on none), and the timeline's bar
    * lines are trimmed as after a move. With a REST backend, saved by
@@ -1319,6 +1438,7 @@ export class TimelineView {
   /** Removes the view's DOM and event listeners. */
   destroy(): void {
     this.detachDrag();
+    this.detachTooltip();
     this.container.removeEventListener("click", this.onControlClick);
     this.container.removeEventListener("keydown", this.onNameKey);
     this.container.removeEventListener("focusout", this.onNameBlur);
@@ -1602,22 +1722,60 @@ export class TimelineView {
    */
   render(): void {
     if (!this.model) return;
-    render(this.container, this.model, { ...this.display, classes: this.classesOf, taskText: this.taskTextOf });
+    const { tooltip_text, tooltip_class } = this.templates;
+    render(this.container, this.model, {
+      ...this.display,
+      classes: this.classesOf,
+      content: this.contentOf,
+      tooltips: tooltip_text !== undefined || tooltip_class !== undefined,
+    });
     this.applySelection();
   }
 
-  /** The `task_text` template's content. One that throws or returns something else is logged, and the plain text is used. */
-  private readonly taskTextOf = (start: Date, end: Date, item: () => unknown): string | Node | undefined => {
-    const template = this.templates.task_text;
+  /** A content template's result. One that throws or returns something else is logged, and the default text is used. */
+  private readonly contentOf = (name: ContentTemplate, start: Date, end: Date, item: () => unknown, entry?: TaskEntryData): string | Node | undefined => {
+    const template = this.templates[name] as ((start: Date, end: Date, item: unknown, entry?: TaskEntryData) => unknown) | undefined;
     if (!template) return undefined;
     try {
-      const content: unknown = template(start, end, item() as TaskData);
+      const content = template(start, end, item(), entry);
       if (typeof content === "string" || content instanceof Node) return content;
-      console.error("timeline view: templates.task_text returned", content, "instead of a string or node");
+      console.error(`timeline view: templates.${name} returned`, content, "instead of a string or node");
     } catch (error) {
-      console.error("timeline view: templates.task_text threw", error);
+      console.error(`timeline view: templates.${name} threw`, error);
     }
     return undefined;
+  };
+
+  /** The view's own tooltip for an entry or marker label (see `attachTooltip`); null for none. */
+  private readonly buildTooltip = (entry: HTMLElement): HTMLElement | null => {
+    const model = this.model;
+    const marker = entry.dataset.marker === undefined ? undefined : model?.markers.find((m) => String(m.id) === entry.dataset.marker);
+    const task = entry.dataset.task === undefined ? undefined : model?.tasks.find((t) => String(t.id) === entry.dataset.task);
+    if (!marker && !task) return null;
+    const start = marker ? marker.date : task!.start;
+    const end = marker ? marker.date : task!.finish;
+    const item: TaskData | MarkerData = marker ? markerToData(marker) : taskToData(task!);
+    const kind: TooltipKind = marker ? "marker" : entry.classList.contains("tlv-callout") ? "callout" : task!.isMilestone ? "milestone" : "task";
+
+    const tip = document.createElement("div");
+    tip.className = "tlv-tooltip";
+    tip.setAttribute("role", "tooltip");
+    tip.textContent = entry.dataset.tip ?? "";
+    const template = this.templates.tooltip_text;
+    if (template) {
+      try {
+        const content: unknown = template(start, end, item, kind);
+        if (content === "" || content === null || content === undefined || content === false) return null;
+        if (typeof content === "string") tip.innerHTML = content;
+        else if (content instanceof Node) tip.replaceChildren(content);
+        else console.error("timeline view: templates.tooltip_text returned", content, "instead of a string or node");
+      } catch (error) {
+        console.error("timeline view: templates.tooltip_text threw", error);
+      }
+    }
+    const classes = this.classesOf("tooltip_class", start, end, () => item, kind).split(/\s+/).filter(Boolean);
+    if (classes.length) tip.classList.add(...classes);
+    return tip;
   };
 
   /** The classes a template gives. One that throws or returns a non-string is logged and gives none. */
@@ -1626,12 +1784,12 @@ export class TimelineView {
     start: Date,
     end: Date,
     item: () => unknown,
-    line?: number,
+    extra?: number | string,
   ): string => {
     const template = this.templates[name] as ((...args: unknown[]) => unknown) | undefined;
     if (!template) return "";
     try {
-      const classes = template(start, end, item(), line);
+      const classes = template(start, end, item(), extra);
       if (typeof classes === "string") return classes;
       if (classes) console.error(`timeline view: templates.${name} returned`, classes, "instead of a string");
     } catch (error) {

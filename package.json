@@ -28,7 +28,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit && oxlint --type-aware --deny-warnings",
-    "version": "node scripts/update-readme-version.mjs && git add README.md",
+    "version": "node scripts/update-readme-version.mjs && git add README.md CHANGELOG.md",
     "postversion": "git push --follow-tags"
   },
   "peerDependencies": {

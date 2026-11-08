@@ -296,6 +296,25 @@ timeline.on("dragging_ended", (e) => {
 
 `dragging_ended` fires after the drop has been applied, so after its `entry_moved` (or `marker_moved`), and `isDragging()` is already false in both. A drag cancelled by Escape, a cancelled pointer, or the view being destroyed still ends with `dragging_ended`. Drags you run yourself from outside the view (with `targetAt`) don't count.
 
+### Pinning
+
+An entry or marker label with `draggable: false` is pinned: the user can't drag it. It can still be clicked and selected, and your code can still move or remove it (with `controls`, its × still works). Dragging is set per entry, so a task can be pinned on one timeline and free on another:
+
+```js
+timeline.parse({ /* ... */
+  timelines: [{ /* ... */ entries: [
+    { task: 1, line: 0, draggable: false },                      // a pinned task or milestone
+    { task: 2, callout_offset: { x: 20, y: -30 }, draggable: false }  // a pinned callout
+  ] }],
+  markers: [{ id: 1, text: "Today", date: "2026-03-20", draggable: false }]
+});
+
+timeline.setEntryDraggable(timeline_id, task_id, false);   // pin; true unpins
+timeline.setMarkerDraggable(marker_id, false);
+```
+
+`setEntryDraggable` fires `entry_draggable_changed` (`{ timeline_id, task_id, draggable, entry }`); `setMarkerDraggable` is `updateMarker(id, { draggable })` and fires `marker_updated`. Both return a promise that resolves to `false` if nothing changed. `addEntry` takes `draggable: false` in its target. An entry stays pinned when your code moves it. Pinned items have the class `tlv-pinned`, for styling. With a REST backend they are saved with `PATCH .../entries/{task_id}` `{ draggable }` and the marker's `PATCH`. See [examples/pins.html](../examples/pins.html).
+
 ## Adding entries from outside the view
 
 To let users drag items from your own page (a backlog list, a search result) onto the view, handle the drag yourself and ask the view where the pointer is. [examples/add.html](../examples/add.html) is a complete page.
@@ -391,6 +410,8 @@ const part = timeline.getTaskPosition("build", "dev", new Date("2026-04-01T00:00
 
 `task` is a task or its id, and `timeline` a timeline or its id (a task can be on several). `from` and `to` are a `Date` or a date string as in the data, and default to the task's own start and finish, and dates outside the timeline's range are held at the bar's edges. The values describe the layout right now, so ask again after the view is resized. It returns `null` for an unknown task, a task that isn't on that timeline, or a view that isn't shown.
 
+`timeline.getCalloutPosition(task, timeline, from, to)` does the same for a callout's marker on the bar's edge: its short bar, or its milestone symbol. It returns `{ left, right, top, height, width, placement }` in CSS pixels, relative to the callout area, where [callout layers](#callout-layers) are placed. Without `from` and `to` it measures the marker as drawn; with them, `left`, `right` and `width` are that date span. `placement` is `"above"` or `"below"`. It returns `null` if the task isn't a callout on that timeline, or the view isn't shown.
+
 ## Styling with class templates
 
 `timeline.templates` holds functions that return extra CSS classes for the view's elements, so styling can depend on the data, including your own attributes on tasks and timelines:
@@ -410,6 +431,11 @@ timeline.parse(data);
 | Template | Arguments | Element |
 |----------|-----------|---------|
 | `task_text` | `(start, end, task)` | Not a class: the HTML or node inside a task's bar. See [below](#adding-your-own-content-to-task-bars). |
+| `milestone_text` | `(start, end, task)` | Not a class: the content of a milestone's label. |
+| `callout_text` | `(start, end, task)` | Not a class: the content of a callout's label, in place of its name and dates. |
+| `marker_text` | `(start, end, marker)` | Not a class: the content of a marker's label, in place of its text and date. |
+| `tooltip_text` | `(start, end, item, kind)` | Not a class: the content of the tooltip. See [Tooltips](#tooltips). |
+| `tooltip_class` | `(start, end, item, kind)` | The tooltip, `.tlv-tooltip` |
 | `task_class` | `(start, end, task)` | A task's bar, `.tlv-task` |
 | `task_text_class` | `(start, end, task)` | The text in the bar, `.tlv-task-label` |
 | `milestone_class` | `(start, end, task)` | A milestone on a bar line, `.tlv-milestone` |
@@ -478,6 +504,29 @@ timeline.addTaskLayer(function (task, timeline) {
 
 Pseudo-elements aren't included in `toSVG()`, and a layer is exported only as a rectangle in its background color. [examples/templates.html](../examples/templates.html) shows all of this.
 
+`milestone_text`, `callout_text` and `marker_text` work like `task_text` for their labels: same return values, same escaping warning, and `toSVG()` writes the plain name (for a callout or marker, without the dates). `callout_text` and `marker_text` replace the whole label, so include the dates if you want them.
+
+`task_text`, `milestone_text` and `callout_text` also get a fourth argument, the task's `entry` on the timeline being drawn, since a task can be placed differently on each one. For example, to show a symbol on [pinned](#pinning) items:
+
+```js
+timeline.templates.task_text = (start, end, task, entry) =>
+  (entry.draggable === false ? "📌 " : "") + timeline.escapeHtml(task.text);
+timeline.templates.marker_text = (start, end, marker) =>
+  (marker.draggable === false ? "📌 " : "") + timeline.escapeHtml(marker.text);
+```
+
+### Tooltips
+
+Without tooltip templates, items have the browser's own tooltip with their name and dates. Set `tooltip_text` or `tooltip_class` and the view draws its own (`.tlv-tooltip`) instead, for task bars, milestones, callouts and marker labels:
+
+```js
+timeline.templates.tooltip_text = (start, end, item, kind) =>
+  `<strong>${timeline.escapeHtml(item.text)}</strong><br>${start.toLocaleDateString()}`;
+timeline.templates.tooltip_class = (start, end, item, kind) => (item.important ? "important" : "");
+```
+
+`item` is the task's or marker's data, and `kind` is `"task"`, `"milestone"`, `"callout"` or `"marker"`. `tooltip_text` returns an HTML string or DOM node, escaped as for `task_text`; `""` or `null` means no tooltip for that item. If it throws, or with only `tooltip_class`, the tooltip shows the default text. A tooltip follows the pointer, doesn't catch the mouse, and doesn't show during a drag or on touch screens.
+
 ## Task layers
 
 `timeline.addTaskLayer(layer)` draws your own elements on the bars, for example each task's planned period behind its actual bar. Any attributes on a task that the view doesn't know are kept with it, so you can put what a layer needs in the data:
@@ -505,6 +554,26 @@ timeline.addTaskLayer(function draw_planned(task, timeline) {
 The function is called for each task on a bar line, once per timeline it is on, with the task's data (including your attributes) and that timeline's data. Inside a `function`, `this` is the view; an arrow function can use your own variable for the view instead. Pass the timeline on to `getTaskPosition`, as above, so the element lands on the right timeline. Return an element, or `false` for none; the view makes it absolutely positioned. Layers lie under the task bars and don't catch the mouse, so dragging works as usual; set `z-index` or `pointer-events` on your element to change that. Tasks shown as callouts have no layer.
 
 Layers are drawn again after every change and resize, so keep the function quick and without side effects. It isn't called while the view is hidden. A function that throws is logged and skipped for that task. `addTaskLayer` returns an id for `removeTaskLayer(id)`; with React, call it through the `ref`. `toSVG()` draws layers as rectangles filled with their background color. See [examples/layers.html](../examples/layers.html).
+
+## Callout layers
+
+`timeline.addCalloutLayer(layer)` is `addTaskLayer` for callouts: it draws your own elements in the callout area, on the bar's edge, under the callouts. `layer(task, timeline)` is called for each callout, and places its element with `getCalloutPosition`:
+
+```js
+timeline.addCalloutLayer(function (task, timeline) {
+  const sizes = this.getCalloutPosition(task, timeline);
+  if (!sizes) return false;
+  const el = document.createElement("div");
+  el.className = "edge-band";
+  el.style.left = sizes.left + "px";
+  el.style.top = sizes.top + "px";
+  el.style.width = sizes.width + "px";
+  el.style.height = sizes.height + "px";
+  return el;
+});
+```
+
+Everything else works as for task layers: `false` for none, redrawn after every change and resize, not called while hidden, no mouse events by default, and exported by `toSVG()` as rectangles in their background color. `addCalloutLayer` returns an id for `removeCalloutLayer(id)`.
 
 ## Exporting as SVG
 

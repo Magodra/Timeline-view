@@ -1,7 +1,7 @@
 import { formatDate } from "./dates";
-import type { DateKind, Scale, TimelineTemplates } from "./types";
+import type { ContentTemplate, DateKind, Scale, TaskEntryData, TimelineTemplates } from "./types";
 import type { Tick } from "./scale";
-import { firstLine, lineCount, markerToData, taskToData, timelineToData, viewRange, type Entry, type Marker, type Task, type Timeline, type TimelineModel } from "./model";
+import { entryToData, firstLine, lineCount, markerToData, taskToData, timelineToData, viewRange, type Entry, type Marker, type Task, type Timeline, type TimelineModel } from "./model";
 import { fraction, periodSerial, ticks } from "./scale";
 
 /** Bar line height in px. The drag code reads positions from the DOM, so only rendering uses this. */
@@ -38,8 +38,10 @@ export interface Display {
   tick: (tick: Tick, scale: Scale) => string;
   /** Draw the built-in controls (the view's `controls` option): menu, × on entries, ↑/↓ and an editable name on labels. */
   controls?: boolean;
-  /** The `task_text` template's content for a task's bar; undefined for its plain text. */
-  taskText?: (start: Date, end: Date, item: () => unknown) => string | Node | undefined;
+  /** A content template's result (`task_text`, ...); undefined for the default text. */
+  content?: (name: ContentTemplate, start: Date, end: Date, item: () => unknown, entry?: TaskEntryData) => string | Node | undefined;
+  /** The view draws its own tooltips (a tooltip template is set), so elements get `data-tip`, not `title`. */
+  tooltips?: boolean;
   /** The extra classes a template gives (the view's `templates`); `item` is only built if there is one. */
   classes?: (name: keyof TimelineTemplates, start: Date, end: Date, item: () => unknown, line?: number) => string;
 }
@@ -57,6 +59,29 @@ function styled<T extends HTMLElement>(
   const classes = display.classes?.(name, start, end, item, line).split(/\s+/).filter(Boolean);
   if (classes?.length) node.classList.add(...classes);
   return node;
+}
+
+/** Puts a content template's result in `node`; false if there is none. `plain` is what the SVG export writes. */
+function fill(node: HTMLElement, display: Display, name: ContentTemplate, start: Date, end: Date, item: () => unknown, plain: string, entry?: Entry): boolean {
+  const content = display.content?.(name, start, end, item, entry && entryToData(entry));
+  if (content === undefined) return false;
+  if (typeof content === "string") node.innerHTML = content;
+  else node.replaceChildren(content);
+  node.dataset.plainText = plain;
+  return true;
+}
+
+/** A callout's or marker's label text: the template's content, or the name and the date(s). */
+function fillLabel(box: HTMLElement, display: Display, name: ContentTemplate, start: Date, end: Date, item: () => unknown, title: string, dates: string, entry?: Entry): void {
+  const custom = el("div", "tlv-callout-title tlv-callout-title--custom");
+  if (fill(custom, display, name, start, end, item, title, entry)) box.append(custom);
+  else box.append(el("div", "tlv-callout-title", title), el("div", "tlv-callout-dates", dates));
+}
+
+/** Sets an item's default tooltip: the browser's, or the text for the view's own. */
+function hint(node: HTMLElement, display: Display, text: string): void {
+  if (display.tooltips) node.dataset.tip = text;
+  else node.title = text;
 }
 
 /** The built-in formats: ISO-style dates in UTC, English month names. No controls. */
@@ -452,12 +477,13 @@ function markerLabel(part: MarkerPart, placement: "above" | "below", display: Di
   const box = styled(markerColor(el("div", "tlv-marker-label"), marker), display, "marker_class", marker.date, marker.date, () => markerToData(marker));
   // Draggable like a callout (data-entry); drag.ts tells it apart by data-marker.
   Object.assign(box.dataset, { entry: "", marker: String(marker.id), at: String(at), x: String(x), y: String(y), reach: "0" });
+  box.classList.toggle("tlv-pinned", !marker.draggable);
   box.style.marginLeft = `calc(${pct(at)} + ${x}px)`;
   if (placement === "above") box.style.marginBottom = `${-y}px`;
   else box.style.marginTop = `${y}px`;
   const date = display.date(marker.date, "marker");
-  box.title = `${marker.text} (${date})`;
-  box.append(el("div", "tlv-callout-title", marker.text), el("div", "tlv-callout-dates", date));
+  hint(box, display, `${marker.text} (${date})`);
+  fillLabel(box, display, "marker_text", marker.date, marker.date, () => markerToData(marker), marker.text, date);
   return [connector, box];
 }
 
@@ -504,6 +530,7 @@ function entryElement(className: string, timeline: Timeline, entry: Entry, at: n
   node.dataset.timeline = String(timeline.id);
   node.dataset.task = String(entry.taskId);
   node.dataset.at = String(at);
+  node.classList.toggle("tlv-pinned", entry.draggable === false);
   return node;
 }
 
@@ -586,28 +613,22 @@ function renderOnEntry(model: TimelineModel, timeline: Timeline, entry: Entry, d
   if (task.isMilestone) {
     const node = styled(entryElement("tlv-milestone", timeline, entry, center), display, "milestone_class", task.start, task.finish, item);
     node.style.left = pct(from);
-    node.title = title;
+    hint(node, display, title);
     applyColor(node, task);
-    node.append(
-      el("span", `tlv-symbol tlv-symbol--${task.symbol ?? model.view.milestoneSymbol}`),
-      styled(el("span", "tlv-milestone-label", task.text), display, "milestone_text_class", task.start, task.finish, item),
-    );
+    const text = styled(el("span", "tlv-milestone-label", task.text), display, "milestone_text_class", task.start, task.finish, item);
+    fill(text, display, "milestone_text", task.start, task.finish, item, task.text, entry);
+    node.append(el("span", `tlv-symbol tlv-symbol--${task.symbol ?? model.view.milestoneSymbol}`), text);
     if (display.controls) node.append(removeControl());
     return node;
   }
 
   const node = styled(entryElement("tlv-task", timeline, entry, center), display, "task_class", task.start, task.finish, item);
   placeSpan(node, "tlv-task", from, to);
-  node.title = title;
+  hint(node, display, title);
   applyColor(node, task);
   // The stylesheet moves the label beside the bar when the bar is too narrow for it.
   const label = styled(el("span", "tlv-task-label", task.text), display, "task_text_class", task.start, task.finish, item);
-  const content = display.taskText?.(task.start, task.finish, item);
-  if (content !== undefined) {
-    if (typeof content === "string") label.innerHTML = content;
-    else label.replaceChildren(content);
-    label.dataset.plainText = task.text; // what the SVG export writes
-  }
+  fill(label, display, "task_text", task.start, task.finish, item, task.text, entry);
   node.append(label);
   // A task that continues past the timeline's start or finish gets an arrow at that end.
   continuation(node, "tlv-task", before, after);
@@ -647,6 +668,7 @@ function renderCalloutArea(model: TimelineModel, timeline: Timeline, placement: 
       continuation(marker, "tlv-edge-bar", before, after);
       reach = EDGE_BAR_HEIGHT;
     }
+    marker.dataset.edge = String(task.id); // getCalloutPosition finds it by this
     applyColor(marker, task);
     styled(marker, display, "callout_marker_class", task.start, task.finish, () => taskToData(task));
 
@@ -660,8 +682,8 @@ function renderCalloutArea(model: TimelineModel, timeline: Timeline, placement: 
     // y is from the bar to the label's near edge: negative above, positive below.
     if (placement === "above") box.style.marginBottom = `${-y}px`;
     else box.style.marginTop = `${y}px`;
-    box.title = `${task.text} (${taskDates(task, display)})`;
-    box.append(el("div", "tlv-callout-title", task.text), el("div", "tlv-callout-dates", taskDates(task, display)));
+    hint(box, display, `${task.text} (${taskDates(task, display)})`);
+    fillLabel(box, display, "callout_text", task.start, task.finish, () => taskToData(task), task.text, taskDates(task, display), entry);
 
     if (display.controls) box.append(removeControl());
     area.append(marker, connector, box);

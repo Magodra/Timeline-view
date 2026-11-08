@@ -22,3 +22,15 @@ if (updated !== text) {
 } else {
     console.log("README.md: no /blob/, /tags/ or /tree/ links to change");
 }
+
+// Updates the "## Unreleased" section in CHANGELOG.md to the current version.
+const changelog = fileURLToPath(new URL("../CHANGELOG.md", import.meta.url));
+const textChangelog = readFileSync(changelog, "utf8");
+const updatedChangelog = textChangelog.replace(/^## Unreleased(?=\r?$)/m, `## ${version}`);
+
+if (updatedChangelog !== textChangelog) {
+    writeFileSync(changelog, updatedChangelog);
+    console.log(`CHANGELOG.md: "## Unreleased" replaced with "## ${version}"`);
+} else {
+    console.log('CHANGELOG.md: no "## Unreleased" section to change');
+}

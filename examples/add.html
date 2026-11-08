@@ -25,13 +25,17 @@
             position: fixed; z-index: 10; pointer-events: none; opacity: 0.85;
             padding: 6px 10px; border-radius: 6px; background: #2f6feb; color: white;
         }
+        /* Pinned entries (draggable: false) get the class tlv-pinned. */
+        .tlv-task.tlv-pinned, .tlv-milestone.tlv-pinned { outline: 2px dashed #8250df; outline-offset: 1px; }
+        .tlv-callout.tlv-pinned { border-style: dashed; }
         @media (max-width: 700px) { .layout { flex-direction: column; } .backlog { flex-basis: auto; width: 100%; } }
     </style>
 </head>
 <body>
     <h1>Drag in from a list</h1>
-    <p>Drag a task or milestone from the list onto a bar line, the half line above or below the bar's lines (opens a new line), or a callout area above or below a bar. The target under the pointer is highlighted. A task can go on several timelines, but only once on each. Press Escape to cancel. To take a task off a timeline, click it in the view and press "Remove from timeline" (<code>removeEntry</code>); the task stays in the data.</p>
+    <p>Drag a task or milestone from the list onto a bar line, the half line above or below the bar's lines (opens a new line), or a callout area above or below a bar. The target under the pointer is highlighted. A task can go on several timelines, but only once on each. Press Escape to cancel. To take a task off a timeline, click it in the view and press "Remove from timeline" (<code>removeEntry</code>); the task stays in the data. Tick "Pin dropped items" and what you drop can't be dragged in the view afterwards (<code>draggable: false</code>; shown dashed).</p>
     <p class="controls">
+        <label><input type="checkbox" id="pin_dropped"> Pin dropped items</label>
         <button type="button" id="remove_entry" disabled>Remove from timeline</button>
         <span id="status">Nothing added yet.</span>
     </p>
@@ -113,7 +117,8 @@
                 timeline.highlightTarget(null);
                 if (!drop || !target) return;
                 // A refused drop rejects the promise, for example: already on that timeline.
-                timeline.addEntry(taskArg(task), target).catch((error) => {
+                const pin = document.getElementById("pin_dropped").checked;
+                timeline.addEntry(taskArg(task), pin ? { ...target, draggable: false } : target).catch((error) => {
                     status.textContent = error.message;
                 });
             };

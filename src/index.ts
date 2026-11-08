@@ -4,6 +4,7 @@ import {
   type TimelineEventName,
   type TimelineEvents,
   type TimelineHandlers,
+  type CalloutLayer,
   type TaskLayer,
   type TimelineFormatters,
   type TimelineOptions,
@@ -29,6 +30,8 @@ export {
   TimelineView,
   defaultFormatDate,
   defaultFormatTick,
+  type CalloutLayer,
+  type EntryDraggableChangedEvent,
   type TaskLayer,
   type TimelineFormatters,
   type EntryAddedEvent,
@@ -64,7 +67,7 @@ export {
  */
 let current: TimelineView | undefined;
 
-/** Escapes text for use in the HTML a `task_text` template returns. */
+/** Escapes text for use in the HTML a content or tooltip template returns. */
 export const escapeHtml = (text: string): string =>
   text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -94,6 +97,12 @@ export const getTaskPosition = (task: Id | TaskData, timeline: Id | TimelineData
   instance().getTaskPosition(task, timeline, from, to);
 export const addTaskLayer = (layer: TaskLayer) => instance().addTaskLayer(layer);
 export const removeTaskLayer = (id: number) => instance().removeTaskLayer(id);
+export const getCalloutPosition = (task: Id | TaskData, timeline: Id | TimelineData, from?: Date | string, to?: Date | string) =>
+  instance().getCalloutPosition(task, timeline, from, to);
+export const addCalloutLayer = (layer: CalloutLayer) => instance().addCalloutLayer(layer);
+export const removeCalloutLayer = (id: number) => instance().removeCalloutLayer(id);
+export const setEntryDraggable = (timelineId: Id, taskId: Id, draggable: boolean) => instance().setEntryDraggable(timelineId, taskId, draggable);
+export const setMarkerDraggable = (markerId: Id, draggable: boolean) => instance().setMarkerDraggable(markerId, draggable);
 export const setFormatters = (formatters: TimelineFormatters) => instance().setFormatters(formatters);
 export const setControls = (on: boolean) => instance().setControls(on);
 export const moveEntry = (timelineId: Id, taskId: Id, patch: MovePatchData) =>

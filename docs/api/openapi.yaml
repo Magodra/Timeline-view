@@ -669,12 +669,14 @@ components:
           properties:
             task: { $ref: "#/components/schemas/Id" }
             line: { type: integer, minimum: 0, default: 0 }
+            draggable: { type: boolean, default: true, description: "`false` pins the entry against the user's dragging." }
         - type: object
           required: [task, callout_offset]
           additionalProperties: false
           properties:
             task: { $ref: "#/components/schemas/Id" }
             callout_offset: { $ref: "#/components/schemas/Offset" }
+            draggable: { type: boolean, default: true, description: "`false` pins the entry against the user's dragging." }
         - type: object
           description: Shows a (non-global) marker on this timeline.
           required: [marker]
@@ -704,6 +706,7 @@ components:
           description: |
             Label position, like `callout_offset`: `y ≤ 0` above the topmost
             bar, `y > 0` below the bottommost. Default `{ x: 0, y: -16 }`.
+        draggable: { type: boolean, default: true, description: "`false` pins the label against the user's dragging." }
 
     Timeline:
       type: object
@@ -768,6 +771,11 @@ components:
             Only for `above` and `below`; `y ≤ 0` above, `y > 0` below. If left out, a callout keeps its offset,
             mirrored (`y` → `-y`) when it switches side; an entry coming from the
             bar gets the default.
+        draggable:
+          type: boolean
+          description: |
+            Pins (`false`) or unpins (`true`) the entry. Left out, it stays as it
+            is. Sent alone, nothing moves and the timeline isn't trimmed.
         version:
           type: integer
           description: The view version the client last saw.
@@ -789,6 +797,7 @@ components:
         color: { type: [string, "null"], description: "Any CSS color; null for the theme's." }
         global: { type: boolean }
         marker_offset: { $ref: "#/components/schemas/Offset" }
+        draggable: { type: boolean }
         version: { type: integer, description: The view version the client last saw. }
 
     MarkerResult:
@@ -848,6 +857,7 @@ components:
         callout_offset:
           allOf: [{ $ref: "#/components/schemas/Offset" }]
           description: Label position, for `above` and `below`. Default `{ x: 0, y: ∓16 }`.
+        draggable: { type: boolean, default: true, description: "`false` adds the entry pinned." }
         version:
           type: integer
           description: The view version the client last saw.
