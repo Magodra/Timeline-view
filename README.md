@@ -2,7 +2,7 @@
 
 A timeline view for web planning applications. Framework-free TypeScript with no runtime dependencies.
 
-![Two timelines with task bars, milestones and callouts above and below the bars](https://github.com/Magodra/ar-timeline-view/docs/images/features.svg)
+![Two timelines with task bars, milestones and callouts above and below the bars](https://github.com/Magodra/raw/main/ar-timeline-view/docs/images/features.svg)
 
 - Several timelines stacked in one view, each with its own date range, on an hour, day, week, month or year scale.
 - Relative timelines that each fill the width, or absolute ones on a common time axis.
