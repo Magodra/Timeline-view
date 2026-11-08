@@ -36,20 +36,75 @@ function el<K extends keyof HTMLElementTagNameMap>(
 export interface Display {
   date: (date: Date, kind: DateKind) => string;
   tick: (tick: Tick, scale: Scale) => string;
+  /** Draw the built-in controls (the view's `controls` option): menu, × on entries, ↑/↓ and an editable name on labels. */
+  controls?: boolean;
 }
 
-/** The built-in formats: ISO-style dates in UTC, English month names. */
+/** The built-in formats: ISO-style dates in UTC, English month names. No controls. */
 export const defaultDisplay: Display = {
   date: (date) => formatDate(date),
   tick: (tick) => tick.label,
 };
+
+/**
+ * A built-in control button. `data-action` tells the view what to do; the
+ * drag code ignores presses on `.tlv-control`, so they never start a drag or
+ * select anything.
+ */
+function control(action: string, text: string, label: string, className = ""): HTMLButtonElement {
+  const button = el("button", `tlv-control ${className}`.trim(), text);
+  button.type = "button";
+  button.dataset.action = action;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  return button;
+}
+
+/** The menu above the view's heading. */
+function renderMenu(): HTMLElement {
+  const menu = el("div", "tlv-menu");
+  menu.setAttribute("role", "toolbar");
+  menu.setAttribute("aria-label", "Timeline view");
+  menu.append(control("add-timeline", "+ Timeline", "Add a timeline"));
+  return menu;
+}
+
+/** A timeline's name label: plain text, or with controls ↑, an editable name, and ↓. */
+function renderName(timeline: Timeline, index: number, count: number, display: Display): HTMLElement {
+  if (!display.controls) return el("div", "tlv-name", timeline.name);
+  const name = el("div", "tlv-name tlv-name--controls");
+  const text = el("span", "tlv-name-text", timeline.name);
+  // Plain text only (no pasted formatting), where the browser supports it; it throws where it doesn't.
+  try {
+    text.contentEditable = "plaintext-only";
+  } catch {
+    text.contentEditable = "true";
+  }
+  if (!text.hasAttribute("contenteditable")) text.setAttribute("contenteditable", "plaintext-only");
+  text.spellcheck = false;
+  text.dataset.action = "rename-timeline";
+  text.setAttribute("role", "textbox");
+  text.setAttribute("aria-label", "Timeline name");
+  text.title = "Click to rename";
+  const up = control("timeline-up", "↑", "Move up", "tlv-control--move");
+  const down = control("timeline-down", "↓", "Move down", "tlv-control--move");
+  up.disabled = index === 0;
+  down.disabled = index === count - 1;
+  name.append(up, text, down);
+  return name;
+}
+
+/** The × that takes an entry's task off its timeline. */
+const removeControl = () => control("remove-entry", "×", "Remove from timeline", "tlv-control--remove");
 
 /** Replaces the contents of `root` with the rendered view. */
 export function render(root: HTMLElement, model: TimelineModel, display: Display = defaultDisplay): void {
   root.classList.add("tlv");
   root.classList.toggle("tlv--no-dates", !model.view.showDates);
   const markers = markerPlan(model);
-  root.replaceChildren(...model.timelines.map((t) => renderTimeline(model, t, markers.get(String(t.id)) ?? [], display)));
+  root.replaceChildren(
+    ...model.timelines.map((t, i) => renderTimeline(model, t, i, markers.get(String(t.id)) ?? [], display)),
+  );
   root.append(...markerLines(model, markers));
   // The view's name, if it has one, as a heading above the timelines.
   if (model.view.name.trim()) {
@@ -58,6 +113,8 @@ export function render(root: HTMLElement, model: TimelineModel, display: Display
     title.setAttribute("aria-level", "2");
     root.prepend(title);
   }
+  // The built-in menu goes above the heading.
+  if (display.controls) root.prepend(renderMenu());
   layout(root);
   watchLayout(root);
 }
@@ -377,7 +434,13 @@ function markerLabel(part: MarkerPart, placement: "above" | "below", display: Di
   return [connector, box];
 }
 
-function renderTimeline(model: TimelineModel, timeline: Timeline, markers: MarkerPart[], display: Display): HTMLElement {
+function renderTimeline(
+  model: TimelineModel,
+  timeline: Timeline,
+  index: number,
+  markers: MarkerPart[],
+  display: Display,
+): HTMLElement {
   const row = el("section", `tlv-timeline tlv-timeline--name-${model.view.namePosition}`);
   row.dataset.timeline = String(timeline.id);
   row.setAttribute("aria-label", timeline.name);
@@ -401,7 +464,7 @@ function renderTimeline(model: TimelineModel, timeline: Timeline, markers: Marke
   }
   const center = el("div", "tlv-center");
   center.append(spanNode);
-  row.append(el("div", "tlv-name", timeline.name), center);
+  row.append(renderName(timeline, index, model.timelines.length, display), center);
   return row;
 }
 
@@ -498,6 +561,7 @@ function renderOnEntry(model: TimelineModel, timeline: Timeline, entry: Entry, d
       el("span", `tlv-symbol tlv-symbol--${task.symbol ?? model.view.milestoneSymbol}`),
       el("span", "tlv-milestone-label", task.text),
     );
+    if (display.controls) node.append(removeControl());
     return node;
   }
 
@@ -511,6 +575,7 @@ function renderOnEntry(model: TimelineModel, timeline: Timeline, entry: Entry, d
   continuation(node, "tlv-task", before, after);
   if (before) node.append(el("span", "tlv-arrow tlv-arrow--before"));
   if (after) node.append(el("span", "tlv-arrow tlv-arrow--after"));
+  if (display.controls) node.append(removeControl());
   return node;
 }
 
@@ -559,6 +624,7 @@ function renderCalloutArea(model: TimelineModel, timeline: Timeline, placement: 
     box.title = `${task.text} (${taskDates(task, display)})`;
     box.append(el("div", "tlv-callout-title", task.text), el("div", "tlv-callout-dates", taskDates(task, display)));
 
+    if (display.controls) box.append(removeControl());
     area.append(marker, connector, box);
   }
   return area;

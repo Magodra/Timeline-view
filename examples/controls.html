@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Timeline view - built-in controls</title>
+    <script src="../dist/timelineview.js"></script>
+    <link href="../dist/timelineview.css" rel="stylesheet">
+    <link href="examples.css" rel="stylesheet">
+</head>
+<body>
+    <h1>Built-in controls</h1>
+    <p>
+        With the <code>controls</code> option the view brings its own editing controls, so a page
+        needs no buttons of its own:
+    </p>
+    <ul>
+        <li>The menu above the heading adds a timeline ("+ Timeline"), named "New timeline" and ready to rename.</li>
+        <li>Hover over a task, milestone or label (or select it) and press <b>×</b> to take it off that timeline.</li>
+        <li>On each name label, <b>↑</b> and <b>↓</b> move the timeline; click the name to rename it, then press Enter or click elsewhere to save, or Escape to cancel.</li>
+    </ul>
+    <p>
+        Every control calls the same methods a host would (<code>addTimeline</code>, <code>removeEntry</code>,
+        <code>moveTimelineUp</code>, <code>renameTimeline</code>, ...), so it fires the usual events, shown
+        below, and with a REST backend it is saved. Dragging works as always.
+    </p>
+    <p class="controls">
+        <label><input type="checkbox" id="controls" checked> Show the built-in controls</label>
+        <button type="button" id="reset">Start over</button>
+    </p>
+    <div id="timeline_here"></div>
+    <h2>Events</h2>
+    <pre id="log">Nothing yet.</pre>
+    <script>
+        const data = {
+            view: { name: "Product plan", scale: "month", compact_lines: true },
+            tasks: [
+                { id: "design", text: "Design", start_date: "2026-01-12", duration: "6w" },
+                { id: "build", text: "Build", start_date: "2026-02-23", duration: "3m" },
+                { id: "review", text: "Design review", start_date: "2026-02-20", symbol: "circle" },
+                { id: "test", text: "Testing", start_date: "2026-04-20", duration: "6w" },
+                { id: "launch", text: "Launch", start_date: "2026-06-15", symbol: "star", color: "#bf8700" },
+                { id: "docs", text: "Documentation", start_date: "2026-04-01", duration: "2m" }
+            ],
+            timelines: [
+                { id: "dev", name: "Development", start_date: "2026-01-01", finish_date: "2026-07-01", entries: [
+                    { task: "design", line: 0 },
+                    { task: "build", line: 1 },
+                    { task: "review", callout_offset: { x: -30, y: -16 } }
+                ]},
+                { id: "qa", name: "Quality", start_date: "2026-01-01", finish_date: "2026-07-01", entries: [
+                    { task: "test", line: 0 },
+                    { task: "docs", line: 1 },
+                    { task: "launch", callout_offset: { x: -70, y: 16 } }
+                ]}
+            ]
+        };
+
+        timeline.init("timeline_here", { controls: true });
+        timeline.parse(structuredClone(data));
+
+        // The checkbox turns the controls off and on (setControls); "Start over" reloads the data.
+        document.getElementById("controls").addEventListener("change", (e) => timeline.setControls(e.target.checked));
+        document.getElementById("reset").addEventListener("click", () => {
+            timeline.parse(structuredClone(data));
+            log.textContent = "Started over.";
+        });
+
+        // What the controls did: the same events a host would get from its own buttons.
+        const log = document.getElementById("log");
+        const show = (name, detail) => {
+            const line = `${name}: ${JSON.stringify(detail)}`;
+            log.textContent = log.textContent === "Nothing yet." || log.textContent === "Started over." ? line : `${line}\n${log.textContent}`;
+        };
+        timeline.on("entry_removed", (e) => show("entry_removed", { timeline_id: e.timeline_id, task_id: e.task_id }));
+        timeline.on("timeline_moved", (e) => show("timeline_moved", { timeline_id: e.timeline_id, order: e.order }));
+        timeline.on("timeline_renamed", (e) => show("timeline_renamed", e));
+        timeline.on("timeline_added", (e) => show("timeline_added", { timeline_id: e.timeline_id, name: e.timeline.name }));
+        timeline.on("entry_moved", (e) => show("entry_moved", e));
+    </script>
+</body>
+</html>

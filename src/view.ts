@@ -18,9 +18,10 @@ import {
   taskToData,
   TimelineModel,
   timelineToData,
+  viewRange,
   type Task,
 } from "./model";
-import { dateToData, formatDate } from "./dates";
+import { addMonths, dateToData, formatDate, parseDate } from "./dates";
 import { label as tickLabel } from "./scale";
 import { attachAt, defaultDisplay, layout, render, unwatchLayout, type Display } from "./render";
 import { toSVG } from "./svg";
@@ -49,6 +50,15 @@ export interface TimelineOptions extends TimelineFormatters {
   api_url?: string;
   /** Replacement for `fetch`, mainly for tests and mock backends. */
   fetch?: typeof fetch;
+  /**
+   * Show the built-in controls: a menu above the heading (add a timeline),
+   * a × on each entry (take the task off that timeline), and on each name
+   * label ↑/↓ (reorder) and an editable name (rename). They call the same
+   * methods a host would (`addTimeline`, `removeEntry`, `moveTimelineUp`, ...),
+   * so they fire the usual events and are saved with a REST backend.
+   * Default: false. Change it later with `setControls`.
+   */
+  controls?: boolean;
 }
 
 /** How the view writes dates and time-scale labels. Leave one out for the built-in format. */
@@ -406,6 +416,8 @@ export class TimelineView {
   private highlighted?: HTMLElement;
   /** How dates and scale labels are written (see `setFormatters`). */
   private display: Display = defaultDisplay;
+  /** Whether the built-in controls are shown (the `controls` option). */
+  private controls = false;
   private formatters: TimelineFormatters = {};
 
   constructor(container: string | HTMLElement, options: TimelineOptions = {}) {
@@ -416,7 +428,11 @@ export class TimelineView {
     this.container = node;
     if (options.api_url) this.api = new RestClient(options.api_url, options.fetch);
     this.formatters = { format_date: options.format_date, format_tick: options.format_tick };
-    this.display = displayOf(this.formatters);
+    this.controls = options.controls === true;
+    this.display = { ...displayOf(this.formatters), controls: this.controls };
+    node.addEventListener("click", this.onControlClick);
+    node.addEventListener("keydown", this.onNameKey);
+    node.addEventListener("focusout", this.onNameBlur);
     this.detachDrag = attachDrag(
       node,
       (e) => this.onDrop(e),
@@ -437,7 +453,14 @@ export class TimelineView {
    */
   setFormatters(formatters: TimelineFormatters): void {
     this.formatters = { ...this.formatters, ...formatters };
-    this.display = displayOf(this.formatters);
+    this.display = { ...displayOf(this.formatters), controls: this.controls };
+    if (this.model) this.render();
+  }
+
+  /** Shows or hides the built-in controls (the `controls` option), and redraws. */
+  setControls(on: boolean): void {
+    this.controls = on;
+    this.display = { ...this.display, controls: on };
     if (this.model) this.render();
   }
 
@@ -485,15 +508,18 @@ export class TimelineView {
    */
   toSVG(): string {
     this.requireModel();
-    // The export shows the timeline, not the current selection.
+    // The export shows the timeline, not the current selection or the controls.
     const selected = this.selected;
+    const controls = this.controls;
     this.selected = { kind: "task", ids: [] };
-    this.applySelection();
+    if (controls) this.setControls(false);
+    else this.applySelection();
     try {
       return toSVG(this.container);
     } finally {
       this.selected = selected;
-      this.applySelection();
+      if (controls) this.setControls(true);
+      else this.applySelection();
     }
   }
 
@@ -1187,11 +1213,95 @@ export class TimelineView {
   /** Removes the view's DOM and event listeners. */
   destroy(): void {
     this.detachDrag();
+    this.container.removeEventListener("click", this.onControlClick);
+    this.container.removeEventListener("keydown", this.onNameKey);
+    this.container.removeEventListener("focusout", this.onNameBlur);
     unwatchLayout(this.container);
     this.listeners.clear();
     this.handlers.clear();
     this.container.replaceChildren();
     this.container.classList.remove("tlv");
+  }
+
+  /** A built-in control button was clicked: do what its `data-action` says. */
+  private readonly onControlClick = (e: MouseEvent): void => {
+    const button = (e.target as Element).closest<HTMLButtonElement>("button.tlv-control[data-action]");
+    const model = this.model;
+    if (!button || !model || !this.container.contains(button)) return;
+    const row = button.closest<HTMLElement>(".tlv-timeline");
+    const timeline = row ? model.timelines.find((t) => String(t.id) === row.dataset.timeline) : undefined;
+    // Failures are reported through `save_failed`; the promises' rejections are handled there.
+    const done = (change: Promise<unknown>) => void change.catch(() => undefined);
+    switch (button.dataset.action) {
+      case "remove-entry": {
+        const entry = button.closest<HTMLElement>("[data-entry]");
+        const task = model.tasks.find((t) => String(t.id) === entry?.dataset.task);
+        if (timeline && task) done(this.removeEntry(timeline.id, task.id));
+        break;
+      }
+      case "timeline-up":
+        if (timeline) done(this.moveTimelineUp(timeline.id));
+        break;
+      case "timeline-down":
+        if (timeline) done(this.moveTimelineDown(timeline.id));
+        break;
+      case "add-timeline":
+        this.addTimelineFromMenu();
+        break;
+    }
+  };
+
+  /** The menu's "+ Timeline": an empty timeline at the bottom, spanning the others, with its name ready to type. */
+  private addTimelineFromMenu(): void {
+    const model = this.requireModel();
+    let n = model.timelines.length + 1;
+    while (model.findTimeline(`timeline-${n}`)) n++;
+    const id = `timeline-${n}`;
+    const range = viewRange(model);
+    const start = range?.start ?? parseDate(formatDate(new Date()).slice(0, 10));
+    const finish = range?.finish ?? addMonths(start, 3);
+    const added = this.addTimeline({ id, name: "New timeline", start_date: dateToData(start), finish_date: dateToData(finish), entries: [] });
+    void added.catch(() => undefined);
+    const text = [...this.container.querySelectorAll<HTMLElement>(".tlv-timeline")]
+      .find((n) => n.dataset.timeline === id)
+      ?.querySelector<HTMLElement>(".tlv-name-text");
+    if (text) {
+      text.focus();
+      document.getSelection()?.selectAllChildren(text);
+    }
+  }
+
+  /** Enter in an editable name saves it; Escape puts the old name back. */
+  private readonly onNameKey = (e: KeyboardEvent): void => {
+    const text = (e.target as Element).closest?.<HTMLElement>(".tlv-name-text");
+    if (!text) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      text.blur(); // saves, in onNameBlur
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      const timeline = this.timelineOfName(text);
+      if (timeline) text.textContent = timeline.name;
+      text.blur();
+    }
+  };
+
+  /** Leaving an editable name saves it (an empty name puts the old one back). */
+  private readonly onNameBlur = (e: FocusEvent): void => {
+    const text = (e.target as Element).closest?.<HTMLElement>(".tlv-name-text");
+    const timeline = text && this.timelineOfName(text);
+    if (!text || !timeline) return;
+    const name = (text.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (!name || name === timeline.name) {
+      text.textContent = timeline.name;
+      return;
+    }
+    void this.renameTimeline(timeline.id, name).catch(() => undefined);
+  };
+
+  private timelineOfName(text: HTMLElement) {
+    const row = text.closest<HTMLElement>(".tlv-timeline");
+    return row ? this.model?.timelines.find((t) => String(t.id) === row.dataset.timeline) : undefined;
   }
 
   /** The task `targetAt` places a callout for: a known one by id, or new task data. */

@@ -1540,3 +1540,130 @@ describe("date and time-scale formatters", () => {
     expect(defaultFormatDate(new Date(Date.UTC(2026, 0, 1, 9)), { kind: "marker", date_only: false })).toBe("2026-01-01T09:00");
   });
 });
+
+describe("built-in controls", () => {
+  const two = (): TimelineViewData => {
+    const data = sample();
+    data.timelines.push({ id: 2, name: "Two", start_date: "2026-02-01", finish_date: "2026-06-01", entries: [{ task: 1, line: 0 }] });
+    return data;
+  };
+  const withControls = () => {
+    const view = new TimelineView("tl", { controls: true });
+    view.parse(two());
+    return view;
+  };
+  const row = (id: number) => container.querySelector<HTMLElement>(`.tlv-timeline[data-timeline="${id}"]`)!;
+  const button = (scope: ParentNode, action: string) => scope.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)!;
+  const nameText = (id: number) => row(id).querySelector<HTMLElement>(".tlv-name-text")!;
+  const order = () => [...container.querySelectorAll<HTMLElement>(".tlv-timeline")].map((n) => n.dataset.timeline);
+
+  it("are off by default", () => {
+    const view = new TimelineView("tl");
+    view.parse(two());
+    expect(container.querySelector(".tlv-menu, .tlv-control, .tlv-name-text")).toBeNull();
+    expect(row(1).querySelector(".tlv-name")!.textContent).toBe("Project");
+  });
+
+  it("show a menu above the heading, a × on each entry, and ↑/↓ with an editable name on each label", () => {
+    withControls();
+    expect(container.firstElementChild!.className).toBe("tlv-menu");
+    expect(container.children[1].className).toBe("tlv-title");
+    expect(button(container, "add-timeline").textContent).toBe("+ Timeline");
+    // Task 1 on both timelines, milestone 2 as a callout on timeline 1.
+    expect(container.querySelectorAll(".tlv-task > .tlv-control--remove")).toHaveLength(2);
+    expect(container.querySelectorAll(".tlv-callout > .tlv-control--remove")).toHaveLength(1);
+    expect(nameText(1).textContent).toBe("Project");
+    expect(nameText(1).getAttribute("contenteditable")).toBe("plaintext-only");
+    expect([button(row(1), "timeline-up").disabled, button(row(1), "timeline-down").disabled]).toEqual([true, false]);
+    expect([button(row(2), "timeline-up").disabled, button(row(2), "timeline-down").disabled]).toEqual([false, true]);
+  });
+
+  it("× takes the task off that timeline", async () => {
+    const view = withControls();
+    const removed = vi.fn();
+    view.on("entry_removed", removed);
+    button(row(2).querySelector('.tlv-task[data-task="1"]')!, "remove-entry").click();
+    await view.whenSaved();
+    expect(view.serialize().timelines[1].entries).toEqual([]);
+    expect(view.serialize().timelines[0].entries).toContainEqual({ task: 1, line: 1 }); // still on timeline 1
+    expect(removed).toHaveBeenCalledWith(expect.objectContaining({ timeline_id: 2, task_id: 1 }));
+  });
+
+  it("↑ and ↓ reorder the timelines", () => {
+    const view = withControls();
+    const moved = vi.fn();
+    view.on("timeline_moved", moved);
+    button(row(1), "timeline-down").click();
+    expect(order()).toEqual(["2", "1"]);
+    button(row(1), "timeline-up").click();
+    expect(order()).toEqual(["1", "2"]);
+    expect(moved).toHaveBeenCalledTimes(2);
+  });
+
+  it("renames on leaving the name (or Enter), puts it back on Escape, and ignores an empty name", () => {
+    const view = withControls();
+    const renamed = vi.fn();
+    view.on("timeline_renamed", renamed);
+    const blur = (id: number) => nameText(id).dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+
+    nameText(1).textContent = "  Main   plan ";
+    blur(1);
+    expect(view.serialize().timelines[0].name).toBe("Main plan");
+    expect(renamed).toHaveBeenCalledWith({ timeline_id: 1, name: "Main plan", old_name: "Project" });
+
+    nameText(1).textContent = "Changed my mind";
+    nameText(1).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(nameText(1).textContent).toBe("Main plan");
+
+    nameText(1).textContent = "   ";
+    blur(1);
+    expect(nameText(1).textContent).toBe("Main plan");
+    expect(renamed).toHaveBeenCalledOnce();
+
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    nameText(1).dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(true); // no line break in the name
+  });
+
+  it("+ Timeline adds an empty timeline at the bottom, spanning the others, named for editing", () => {
+    const view = withControls();
+    const added = vi.fn();
+    view.on("timeline_added", added);
+    button(container, "add-timeline").click();
+    const data = view.serialize();
+    expect(data.timelines.map((t) => t.id)).toEqual([1, 2, "timeline-3"]);
+    expect(data.timelines[2]).toEqual({ id: "timeline-3", name: "New timeline", start_date: "2026-02-01", finish_date: "2026-06-01", entries: [] });
+    expect(added).toHaveBeenCalledOnce();
+  });
+
+  it("pressing a control neither selects nor starts a drag", () => {
+    const view = withControls();
+    const Pointer = (globalThis.PointerEvent ?? MouseEvent) as typeof MouseEvent;
+    const started = vi.fn();
+    view.on("dragging_started", started);
+    const remove = button(row(1).querySelector('.tlv-task[data-task="1"]')!, "remove-entry");
+    remove.dispatchEvent(new Pointer("pointerdown", { bubbles: true, button: 0, clientX: 10 }));
+    window.dispatchEvent(new Pointer("pointermove", { bubbles: true, button: 0, clientX: 80 }));
+    window.dispatchEvent(new Pointer("pointerup", { bubbles: true, button: 0, clientX: 80 }));
+    nameText(1).dispatchEvent(new Pointer("pointerdown", { bubbles: true, button: 0, clientX: 10 }));
+    window.dispatchEvent(new Pointer("pointerup", { bubbles: true, button: 0, clientX: 10 }));
+    expect(started).not.toHaveBeenCalled();
+    expect(view.getSelectedTasks()).toEqual([]);
+    expect(view.getSelectedTimelines()).toEqual([]);
+  });
+
+  it("can be turned on and off, and stay out of SVG exports", () => {
+    const view = new TimelineView("tl");
+    view.parse(two());
+    view.setControls(true);
+    expect(container.querySelector(".tlv-menu")).not.toBeNull();
+    view.setControls(false);
+    expect(container.querySelector(".tlv-menu, .tlv-control")).toBeNull();
+
+    view.setControls(true);
+    const svg = view.toSVG();
+    expect(svg).not.toContain("×");
+    expect(svg).not.toContain("+ Timeline");
+    expect(container.querySelector(".tlv-menu")).not.toBeNull(); // back after the export
+  });
+});

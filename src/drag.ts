@@ -194,6 +194,9 @@ export function attachDrag(
   const onPointerDown = (down: PointerEvent) => {
     if (down.button !== 0) return;
     const pressed = down.target as Element;
+    // The built-in controls (buttons, the editable name) handle their own clicks:
+    // pressing one starts no drag and selects nothing.
+    if (pressed.closest(".tlv-control, .tlv-name-text")) return;
     const source = pressed.closest<HTMLElement>("[data-entry]");
     if (!source || !root.contains(source)) {
       const background = pressed.closest<HTMLElement>(".tlv-timeline, .tlv-title");

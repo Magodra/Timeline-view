@@ -43,6 +43,8 @@ export interface TimelineProps extends TimelineEventProps, TimelineHandlerProps 
   apiUrl?: string;
   /** Replacement for `fetch` (for tests or a mock backend). Changing it creates a new view. */
   fetch?: typeof fetch;
+  /** Show the built-in controls (the `controls` option). Changing it redraws the view. */
+  controls?: boolean;
   /** How dates are written (the `format_date` option). Changing it redraws the view. */
   formatDate?: DateFormatter;
   /** How the time scale's labels are written (the `format_tick` option). Changing it redraws the view. */
@@ -88,7 +90,7 @@ const HANDLER_PROPS = ["onTaskClick", "onTimelineClick", "onTaskSelected", "onTi
  * container"). Import `ar-timeline-view/timelineview.css` once in the app.
  */
 export const Timeline = forwardRef<TimelineView | null, TimelineProps>(function Timeline(props, ref) {
-  const { data, viewId, apiUrl, fetch: fetchImpl, formatDate, formatTick, className, style } = props;
+  const { data, viewId, apiUrl, fetch: fetchImpl, controls = false, formatDate, formatTick, className, style } = props;
   const container = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<TimelineView | null>(null);
   // The latest props, so the view's listeners (subscribed once) always call the current handlers.
@@ -119,6 +121,9 @@ export const Timeline = forwardRef<TimelineView | null, TimelineProps>(function 
   useEffect(() => {
     view?.setFormatters({ format_date: formatDate, format_tick: formatTick });
   }, [view, formatDate, formatTick]);
+  useEffect(() => {
+    view?.setControls(controls);
+  }, [view, controls]);
 
   const fail = (error: unknown) => {
     const onError = latest.current.onError;

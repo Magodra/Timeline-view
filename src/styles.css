@@ -856,6 +856,136 @@
   box-shadow: none;
 }
 
+/* Built-in controls (the view's `controls` option). */
+.tlv-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--tlv-border);
+}
+
+.tlv-control {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--tlv-text);
+  background: var(--tlv-callout-bg);
+  border: 1px solid var(--tlv-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.tlv-control:hover:not(:disabled) {
+  border-color: var(--tlv-selected);
+}
+
+.tlv-control:focus-visible {
+  outline: 2px solid var(--tlv-selected);
+  outline-offset: 1px;
+}
+
+.tlv-control:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* A name label with ↑, the editable name and ↓. The column stays upright, so the
+   arrows point the right way on either side; only the name runs vertically. */
+.tlv-name--controls,
+.tlv-timeline--name-left .tlv-name--controls {
+  writing-mode: horizontal-tb;
+  transform: none;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 3px 0;
+}
+
+.tlv-control--move {
+  width: 24px;
+  padding: 3px 0;
+}
+
+.tlv-name-text {
+  flex: 1 1 auto;
+  min-height: 0;
+  writing-mode: vertical-rl;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  border-radius: 3px;
+  cursor: text;
+  outline: none;
+}
+
+.tlv-timeline--name-left .tlv-name-text {
+  transform: rotate(180deg);
+}
+
+.tlv-name-text:hover {
+  box-shadow: inset 0 0 0 1px var(--tlv-border);
+}
+
+.tlv-name-text:focus {
+  background: var(--tlv-bg);
+  box-shadow: inset 0 0 0 1px var(--tlv-selected);
+  text-overflow: clip;
+}
+
+/* × on entries: in a corner, shown while hovering the entry, when it is selected
+   (so it can be reached on touch screens), or focused with the keyboard. */
+.tlv-control--remove {
+  position: absolute;
+  z-index: 3;
+  top: -8px;
+  right: -8px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 14px;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
+}
+
+.tlv-task:hover > .tlv-control--remove,
+.tlv-milestone:hover > .tlv-control--remove,
+.tlv-callout:hover > .tlv-control--remove,
+.tlv-selected > .tlv-control--remove,
+.tlv-control--remove:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* A milestone's × goes after its label. */
+.tlv-milestone > .tlv-control--remove {
+  top: 50%;
+  right: -20px;
+  margin-top: -8px;
+}
+
+/* A callout label clips what sticks out, so its × sits inside, with room kept for it. */
+.tlv-callout:has(> .tlv-control--remove) {
+  padding-right: 22px;
+}
+
+.tlv-callout > .tlv-control--remove {
+  top: 50%;
+  right: 3px;
+  margin-top: -8px;
+}
+
+.tlv--dragging .tlv-control--remove {
+  opacity: 0;
+  pointer-events: none;
+}
+
 @media (prefers-color-scheme: dark) {
   .tlv,
   .tlv-ghost {

@@ -359,6 +359,7 @@ function Plan({ initialData }) {
 | Prop | Meaning |
 |------|---------|
 | `data` | The data to show, as for `parse()`. It is loaded when the component mounts and again whenever you pass a different object; re-rendering with the same object doesn't reload it. |
+| `controls` | Show the [built-in controls](#built-in-controls). Changing it redraws the view. |
 | `formatDate`, `formatTick` | As the `format_date` and `format_tick` options (see [Showing dates your way](#showing-dates-your-way)). Changing them redraws the view. |
 | `apiUrl`, `fetch` | As the `api_url` and `fetch` options: with `apiUrl`, changes are saved to the REST backend. Changing either creates a new view. |
 | `viewId` | With `apiUrl`: the view to load from the backend (`load()`), again when it changes. |
@@ -452,6 +453,24 @@ timeline.updateTask("review", { color: null });                          // back
 ```
 
 A task's finish is given one way: setting `duration` drops `finish_date`, and the other way round. The result is checked as `parse()` would check it; a change that would make it invalid (a finish before the start, a bad date or duration, an unknown symbol or color) is refused and nothing changes. Like the other changes it returns a promise: it resolves to `true`, or to `false` when nothing changed, and rejects for a refused change. It fires `task_updated` with `{ task_id, task, old_task }`: the task's data after and before. With a REST backend the change is saved too.
+
+## Built-in controls
+
+The view can bring its own editing controls, so your page needs no buttons for the common changes. Turn them on with the `controls` option:
+
+```js
+timeline.init("timeline_here", { controls: true });
+timeline.setControls(false);   // and off (or on) again later
+```
+
+| Control | Where | Does |
+|---------|-------|------|
+| **+ Timeline** | A menu above the view's heading | Adds an empty timeline at the bottom, spanning the others (`addTimeline`), named "New timeline" with the name selected, so you can type its name right away. |
+| **×** | A corner of each task bar, milestone and callout label; shown while hovering it, or when it is selected (so it can be reached on a touch screen) | Takes the task off that timeline (`removeEntry`). The task stays on its other timelines. |
+| **↑ / ↓** | Each timeline's name label | Moves the timeline up or down (`moveTimelineUp` / `moveTimelineDown`); greyed out at the top and bottom. |
+| **The name** | Each timeline's name label | Click it and type to rename (`renameTimeline`). Enter or clicking elsewhere saves; Escape puts the old name back; an empty name is ignored. |
+
+The controls call the same methods your own buttons would, so they fire the same events (`timeline_added`, `entry_removed`, `timeline_moved`, `timeline_renamed`) and, with a REST backend, are saved the same way. Pressing a control never starts a drag or changes the selection, and `toSVG()` leaves the controls out. A new timeline's id is `timeline-N` (the first free number); if your backend needs its own ids, add timelines with `addTimeline` from your own button instead. [examples/controls.html](../examples/controls.html) shows them all.
 
 ## Changing a timeline's dates
 

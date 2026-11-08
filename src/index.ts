@@ -80,6 +80,7 @@ export const toSVG = () => instance().toSVG();
 export const resize = () => instance().resize();
 export const isDragging = () => instance().isDragging();
 export const setFormatters = (formatters: TimelineFormatters) => instance().setFormatters(formatters);
+export const setControls = (on: boolean) => instance().setControls(on);
 export const moveEntry = (timelineId: Id, taskId: Id, patch: MovePatchData) =>
   instance().moveEntry(timelineId, taskId, patch);
 export const addEntry = (task: Id | TaskData, target: EntryTargetData) => instance().addEntry(task, target);

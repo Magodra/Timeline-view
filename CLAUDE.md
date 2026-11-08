@@ -138,7 +138,7 @@ Duration format: a whole number plus a unit: `h` (hours), `d` (days), `w` (weeks
 Everything in the data can be changed through the [JavaScript API](#javascript-api), and with `api_url` every change is saved through the [REST API](#rest-api). What is missing is UI inside the component:
 
 - Editing a task's dates or duration by dragging or resizing its bar (the host can call `updateTask`).
-- Built-in forms or buttons for adding, renaming or removing tasks, timelines and markers; the host supplies them (see the examples).
+- Built-in controls for the rest: the `controls` option covers adding timelines, taking a task off a timeline, reordering and renaming timelines. Editing tasks, markers and timeline dates, removing timelines and tasks, and renaming the view still need the host's own buttons or forms (see the examples).
 - Keyboard and screen-reader support for moving entries.
 
 Also: a task is created only together with its first entry (`addEntry`); there is no call to create a task that is on no timeline.
@@ -188,6 +188,7 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
 | Call | Purpose |
 |------|---------|
 | `timeline.init(container, { api_url?, fetch?, format_date?, format_tick? })` | Creates the default instance in an element or element id. `format_date(date, { kind, date_only })` and `format_tick(date, { scale, major })` replace the built-in date text and time-scale labels (see below). |
+| `timeline.init(container, { controls: true })`, `timeline.setControls(on)` | The built-in controls: a menu above the heading (`.tlv-menu`, "+ Timeline"), a × on each task bar, milestone and callout (`removeEntry`), and on each name label ↑/↓ (`moveTimelineUp/Down`) and an editable name (`renameTimeline`; Enter or blur saves, Escape cancels, empty is ignored). Drawn by `render.ts` when `Display.controls` is set; buttons carry `data-action`, handled by `onControlClick` in `view.ts`; `drag.ts` ignores presses on `.tlv-control` and `.tlv-name-text`. `toSVG()` renders without them. React: the `controls` prop. |
 | `timeline.setFormatters({ format_date?, format_tick? })` | Replaces either formatter and redraws; `undefined` goes back to the built-in one, a missing key keeps the current one. `defaultFormatDate` / `defaultFormatTick` are exported for falling back. |
 | `timeline.parse(data)` | Loads data and renders it. |
 | `timeline.load(view_id)` | Loads with `GET /views/{view_id}` (needs `api_url`). |
