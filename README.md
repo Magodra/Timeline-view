@@ -14,7 +14,7 @@ A timeline view for web planning applications. Framework-free TypeScript with no
 - Export as SVG (`toSVG()`).
 - Optional REST backend for saving moves, with optimistic updates and rollback.
 
-**Documentation:** [getting started](https://github.com/Magodra/ar-timeline-view/docs/getting-started.html) · [user guide](https://github.com/Magodra/ar-timeline-view/docs/user-guide.html) · [developer guide](https://github.com/Magodra/ar-timeline-view/docs/developer-guide.html) · [REST API](https://github.com/Magodra/ar-timeline-view/docs/api/openapi.yaml)
+**Documentation:** [getting started](https://github.com/Magodra/ar-timeline-view/raw/main/docs/getting-started.html) · [user guide](https://github.com/Magodra/ar-timeline-view/raw/main/docs/user-guide.html) · [developer guide](https://github.com/Magodra/ar-timeline-view/raw/main/docs/developer-guide.html) · [REST API](https://github.com/Magodra/ar-timeline-view/raw/main/docs/api/openapi.yaml)
 
 ## Install
 
@@ -63,11 +63,11 @@ The UMD build sets a global `timeline` object with a default instance:
 
 Either example renders this:
 
-![One timeline with a task bar and a milestone callout below it](https://github.com/Magodra/ar-timeline-view/docs/images/basic.svg)
+![One timeline with a task bar and a milestone callout below it](https://github.com/Magodra/ar-timeline-view/raw/main/docs/images/basic.svg)
 
 With `view.absolute: true`, timelines with different date ranges share one time axis:
 
-![Three timelines with different date ranges on a common time axis; tasks that continue past a range end in arrows](https://github.com/Magodra/ar-timeline-view/docs/images/absolute.svg)
+![Three timelines with different date ranges on a common time axis; tasks that continue past a range end in arrows](https://github.com/Magodra/ar-timeline-view/raw/main/docs/images/absolute.svg)
 
 ## Save changes
 
@@ -79,7 +79,7 @@ timeline.on("entry_moved", ({ timeline_id, task_id, patch }) => {
 });
 ```
 
-Or point it at a backend that implements the [REST API](https://github.com/Magodra/ar-timeline-view/docs/api/openapi.yaml):
+Or point it at a backend that implements the [REST API](https://github.com/Magodra/ar-timeline-view/raw/main/docs/api/openapi.yaml):
 
 ```js
 timeline.init("timeline_here", { api_url: "https://example.com/api" });
