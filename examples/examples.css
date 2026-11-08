@@ -27,6 +27,7 @@ h2 {
 
 .controls {
   display: flex;
+  margin: 1em 0; /* as a <p>, also for a <form class="controls"> */
   flex-wrap: wrap;
   gap: 12px 24px;
   align-items: center;

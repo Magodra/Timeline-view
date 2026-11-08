@@ -20,13 +20,22 @@
         and click a selected item again to deselect. The buttons below are outside the component
         and move the selected timelines with <code>moveTimelineUp</code> / <code>moveTimelineDown</code>,
         or remove the selected tasks or timelines with <code>removeTask</code> / <code>removeTimeline</code>.
+        "Rename" renames the selected timeline with <code>renameTimeline</code>, or the view with
+        <code>renameView</code> when no timeline is selected. "Add timeline" adds an empty timeline
+        with the name you type, spanning all the others; the library has no call for this yet, so
+        the page adds it to <code>serialize()</code> and loads the result with <code>parse()</code>.
     </p>
-    <p class="controls">
+    <!-- The whole row is the form (a form can't sit inside a <p>), so Enter in the
+         name field adds the timeline; the other buttons are type="button". -->
+    <form class="controls" id="add_timeline">
         <button type="button" id="move_up" disabled>Move up</button>
         <button type="button" id="move_down" disabled>Move down</button>
         <button type="button" id="remove" disabled>Remove</button>
+        <button type="button" id="rename">Rename</button>
         <span id="selection">Nothing selected.</span>
-    </p>
+        <button type="submit" id="add_timeline_button" disabled>Add timeline</button>
+        <input type="text" id="new_timeline_name" placeholder="Name" aria-label="New timeline name" required>
+    </form>
     <div id="timeline_here"></div>
 
     <h2>Absolute timelines</h2>
@@ -118,6 +127,47 @@
         });
         timeline.on("task_removed", (e) => console.log("task_removed", e));
         timeline.on("timeline_removed", (e) => console.log("timeline_removed", e));
+        document.getElementById("rename").addEventListener("click", () => {
+            const [id] = timeline.getSelectedTimelines();
+            const data = timeline.serialize();
+            const current = id === undefined ? data.view.name : data.timelines.find((t) => t.id === id).name;
+            const name = prompt(id === undefined ? "View name (empty for no heading):" : "Timeline name:", current);
+            if (name === null) return;   // cancelled
+            if (id === undefined) timeline.renameView(name);
+            else timeline.renameTimeline(id, name);
+        });
+        // Adds an empty timeline at the bottom, covering the range of all the
+        // others. There is no addTimeline call yet: change the data and parse it.
+        const nameField = document.getElementById("new_timeline_name");
+        const addButton = document.getElementById("add_timeline_button");
+        nameField.addEventListener("input", () => {
+            addButton.disabled = nameField.value.trim() === "";
+        });
+        document.getElementById("add_timeline").addEventListener("submit", (e) => {
+            e.preventDefault();   // stay on the page
+            const name = nameField.value.trim();
+            if (!name) return;
+            const data = timeline.serialize();
+            const ids = new Set(data.timelines.map((t) => String(t.id)));
+            let n = data.timelines.length + 1;
+            while (ids.has(`timeline-${n}`)) n++;
+            // ISO dates of the same form compare correctly as strings.
+            const starts = data.timelines.map((t) => t.start_date).sort();
+            const finishes = data.timelines.map((t) => t.finish_date).sort();
+            data.timelines.push({
+                id: `timeline-${n}`,
+                name,
+                start_date: starts[0] ?? "2026-01-01",
+                finish_date: finishes[finishes.length - 1] ?? "2027-01-01",
+                entries: []
+            });
+            timeline.parse(data);   // keeps the selection
+            nameField.value = "";
+            addButton.disabled = true;
+            updateControls();
+        });
+        timeline.on("view_renamed", (e) => console.log("view_renamed", e));
+        timeline.on("timeline_renamed", (e) => console.log("timeline_renamed", e));
     </script>
     <script>
         // A second view on the same page needs its own TimelineView.

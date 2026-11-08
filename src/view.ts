@@ -77,6 +77,17 @@ export interface TimelineRemovedEvent {
   order: Id[];
 }
 
+export interface ViewRenamedEvent {
+  name: string;
+  old_name: string;
+}
+
+export interface TimelineRenamedEvent {
+  timeline_id: Id;
+  name: string;
+  old_name: string;
+}
+
 export interface TimelineEvents {
   /** A move was applied on screen. Fired before the REST request, if any, is sent. */
   entry_moved: EntryMovedEvent;
@@ -103,6 +114,10 @@ export interface TimelineEvents {
   task_removed: TaskRemovedEvent;
   /** A timeline was removed with `removeTimeline`. No REST call yet: saving it is up to the host. */
   timeline_removed: TimelineRemovedEvent;
+  /** The view's name was changed with `renameView`. No REST call yet: saving it is up to the host. */
+  view_renamed: ViewRenamedEvent;
+  /** A timeline's name was changed with `renameTimeline`. No REST call yet: saving it is up to the host. */
+  timeline_renamed: TimelineRenamedEvent;
 }
 
 type Handler<T> = (event: T) => void;
@@ -302,6 +317,37 @@ export class TimelineView {
     const marker = this.requireModel().setMarkerOffset(markerId, offset);
     this.render();
     this.emit("marker_moved", { marker_id: marker.id, marker_offset: { ...marker.offset } });
+  }
+
+  /**
+   * Sets the view's name, shown as the heading ("" for no heading), and
+   * fires `view_renamed`. Returns false, without the event, if the name is
+   * unchanged. Throws a `MoveError` (`invalid`) if `name` isn't a string.
+   * Not sent to the REST API.
+   */
+  renameView(name: string): boolean {
+    const model = this.requireModel();
+    if (model.view.name === name) return false;
+    const old = model.renameView(name);
+    this.render();
+    this.emit("view_renamed", { name, old_name: old });
+    return true;
+  }
+
+  /**
+   * Sets a timeline's name and fires `timeline_renamed`. Returns false,
+   * without the event, if the name is unchanged. Throws a `MoveError`
+   * (`not_found` or `invalid`) for an unknown id or a `name` that isn't a
+   * string. Not sent to the REST API.
+   */
+  renameTimeline(id: Id, name: string): boolean {
+    const model = this.requireModel();
+    const current = model.findTimeline(id);
+    if (current && current.name === name) return false;
+    const { timeline, old } = model.renameTimeline(id, name);
+    this.render();
+    this.emit("timeline_renamed", { timeline_id: timeline.id, name, old_name: old });
+    return true;
   }
 
   /**

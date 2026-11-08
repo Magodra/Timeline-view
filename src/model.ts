@@ -380,6 +380,24 @@ export class TimelineModel {
     return true;
   }
 
+  /** Sets the view's name (the heading; "" for none). Returns the old name. */
+  renameView(name: string): string {
+    if (typeof name !== "string") throw new MoveError("invalid", "name must be a string");
+    const old = this.view.name;
+    this.view.name = name;
+    return old;
+  }
+
+  /** Sets a timeline's name. Returns the timeline and its old name. */
+  renameTimeline(id: Id, name: string): { timeline: Timeline; old: string } {
+    const timeline = this.findTimeline(id);
+    if (!timeline) throw new MoveError("not_found", `Timeline ${id} not found`);
+    if (typeof name !== "string") throw new MoveError("invalid", "name must be a string");
+    const old = timeline.name;
+    timeline.name = name;
+    return { timeline, old };
+  }
+
   /**
    * Removes a task and its entries on every timeline, then trims those
    * timelines' lines. Returns the task and the timelines it was on.

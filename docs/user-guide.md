@@ -286,6 +286,17 @@ timeline.getSelectedTimelines();        // ["dev"], or []
 
 Set `selection: false` in the view to turn selection off: clicks still fire `onTaskClick` and `onTimelineClick`, but nothing is selected or highlighted, and `selectTask`/`selectTimeline` return `false`. The highlight colors are `--tlv-selected`, `--tlv-selected-bg` and `--tlv-selected-text`. SVG exports leave the selection out.
 
+## Renaming
+
+`timeline.renameView(name)` changes the view's name, shown as the heading (`""` removes the heading). `timeline.renameTimeline(id, name)` changes a timeline's name label. Both return `false` and do nothing when the name is unchanged, and throw for an unknown timeline or a name that isn't a string. They fire:
+
+| Event | Gets |
+|-------|------|
+| `view_renamed` | `{ name, old_name }` |
+| `timeline_renamed` | `{ timeline_id, name, old_name }` |
+
+The REST API has no calls for these yet, so with a backend, saving the new name is up to you. The component has no rename UI of its own; [examples/features.html](../examples/features.html) has a Rename button that asks for the selected timeline's name, or the view's when no timeline is selected.
+
 ## Removing tasks and timelines
 
 `timeline.removeTask(id)` removes a task: from the tasks, and from every timeline it is on. The bar lines of those timelines are tidied up as after a move. `timeline.removeTimeline(id)` removes a timeline with its entries; its tasks stay in the data, even those that are now on no timeline. Both deselect what they remove, and throw for an unknown id.
@@ -332,6 +343,8 @@ timeline.on("entry_added", (e) => { /* e.timeline_id, e.task_id, e.task, e.new_t
 timeline.on("timeline_moved", (e) => { /* e.timeline_id, e.from_index, e.to_index, e.order */ });
 timeline.on("task_removed", (e) => { /* e.task_id, e.task, e.timelines */ });
 timeline.on("timeline_removed", (e) => { /* e.timeline_id, e.timeline, e.index, e.order */ });
+timeline.on("view_renamed", (e) => { /* e.name, e.old_name */ });
+timeline.on("timeline_renamed", (e) => { /* e.timeline_id, e.name, e.old_name */ });
 off(); // unsubscribe
 ```
 

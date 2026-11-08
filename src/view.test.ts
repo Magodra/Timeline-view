@@ -807,3 +807,45 @@ describe("removing tasks and timelines", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 });
+
+describe("renaming", () => {
+  it("renames the view, updates the heading and fires view_renamed", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const events: unknown[] = [];
+    view.on("view_renamed", (e) => events.push(e));
+    expect(view.renameView("Plan")).toBe(true);
+    expect(container.querySelector(".tlv-title")!.textContent).toBe("Plan");
+    expect(view.renameView("Plan")).toBe(false); // unchanged: no event
+    expect(view.renameView("")).toBe(true);
+    expect(container.querySelector(".tlv-title")).toBeNull();
+    expect(view.serialize().view.name).toBe("");
+    expect(events).toEqual([
+      { name: "Plan", old_name: "Example" },
+      { name: "", old_name: "Plan" },
+    ]);
+  });
+
+  it("renames a timeline and fires timeline_renamed", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    view.selectTimeline(1);
+    const events: unknown[] = [];
+    view.on("timeline_renamed", (e) => events.push(e));
+    expect(view.renameTimeline(1, "Main")).toBe(true);
+    expect(container.querySelector(".tlv-name")!.textContent).toBe("Main");
+    expect(container.querySelector(".tlv-timeline")!.getAttribute("aria-label")).toBe("Main");
+    expect(view.getSelectedTimelines()).toEqual([1]);
+    expect(view.renameTimeline("1", "Main")).toBe(false);
+    expect(view.serialize().timelines[0].name).toBe("Main");
+    expect(events).toEqual([{ timeline_id: 1, name: "Main", old_name: "Project" }]);
+  });
+
+  it("throws for an unknown timeline or a name that isn't a string", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    expect(() => view.renameTimeline(9, "X")).toThrow(/not found/);
+    expect(() => view.renameTimeline(1, 5 as unknown as string)).toThrow(/string/);
+    expect(() => view.renameView(null as unknown as string)).toThrow(/string/);
+  });
+});
