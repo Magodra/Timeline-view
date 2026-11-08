@@ -106,8 +106,14 @@ components:
 
     Date:
       type: string
-      description: ISO 8601, `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm`.
-      pattern: '^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$'
+      description: |
+        ISO 8601: `YYYY-MM-DD`, `YYYY-MM-DDTHH:mm`, or a full timestamp with
+        seconds, a fraction and a zone (`Z` or an offset such as `+02:00`),
+        for example `2026-04-01T09:30:00Z`. A time with a zone is converted
+        to UTC; a date, or a time without a zone, is read as UTC. The client
+        sends dates back exactly as it received them.
+      pattern: '^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}(:?\d{2})?)?)?$'
+      examples: ["2026-04-01", "2026-04-01T09:30", "2026-04-01T09:30:00Z", "2026-04-01T09:30:00.000+02:00"]
 
     Placement:
       type: string
@@ -167,8 +173,13 @@ components:
 
     Task:
       type: object
-      description: The finish date is `start_date + duration`; it is derived and never sent.
+      description: |
+        The finish is `start_date + duration`, or given as `finish_date`: one
+        or the other, not both. Without either (or with a zero duration, or a
+        `finish_date` equal to `start_date`) the task is a milestone.
       required: [id, text, start_date]
+      not:
+        required: [duration, finish_date]
       properties:
         id: { $ref: "#/components/schemas/Id" }
         text: { type: string }
@@ -177,6 +188,9 @@ components:
           type: string
           description: Whole number plus h, d, w, m (months) or y. Missing or zero means milestone.
           pattern: '^\d+[hdwmy]$'
+        finish_date:
+          allOf: [{ $ref: "#/components/schemas/Date" }]
+          description: The finish, instead of `duration`. Not before `start_date`.
         symbol: { $ref: "#/components/schemas/MilestoneSymbol" }
         color:
           type: string

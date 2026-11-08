@@ -1,4 +1,4 @@
-import { formatDate, parseDate } from "./dates";
+import { dateToData, parseDate } from "./dates";
 import { addDuration, isMilestoneDuration, parseDuration } from "./duration";
 import type {
   EntryData,
@@ -34,9 +34,11 @@ export interface Task {
   id: Id;
   text: string;
   start: Date;
-  /** `start + duration`; equal to `start` for milestones. */
+  /** `start + duration`, or the given `finish_date`; equal to `start` for milestones. */
   finish: Date;
   duration?: string;
+  /** The finish was given as `finish_date` (written back that way), not derived from a duration. */
+  finishGiven: boolean;
   isMilestone: boolean;
   symbol?: MilestoneSymbol;
   /** CSS color overriding the theme's task or milestone color. */
@@ -554,7 +556,7 @@ function markerToData(mk: Marker): MarkerData {
   return {
     id: mk.id,
     text: mk.text,
-    date: formatDate(mk.date),
+    date: dateToData(mk.date),
     ...(mk.global && { global: true }),
     ...(mk.color !== undefined && { color: mk.color }),
     marker_offset: { ...mk.offset },
@@ -564,17 +566,27 @@ function markerToData(mk: Marker): MarkerData {
 export function taskFromData(t: TaskData): Task {
   if (t.id === undefined || t.id === null) throw new Error("Every task needs an id");
   const start = parseDate(t.start_date);
-  const isMilestone = isMilestoneDuration(t.duration);
   if (t.color !== undefined && (typeof t.color !== "string" || !isColor(t.color))) {
     throw new Error(`Task ${t.id}: color must be a CSS color`);
+  }
+  // The finish is given as finish_date, or derived from the duration; not both.
+  let finish: Date;
+  const finishGiven = t.finish_date !== undefined;
+  if (finishGiven) {
+    if (t.duration !== undefined) throw new Error(`Task ${t.id}: give duration or finish_date, not both`);
+    finish = parseDate(t.finish_date!);
+    if (finish < start) throw new Error(`Task ${t.id}: finish_date is before start_date`);
+  } else {
+    finish = isMilestoneDuration(t.duration) ? start : addDuration(start, parseDuration(t.duration!));
   }
   return {
     id: t.id,
     text: t.text ?? "",
     start,
-    finish: isMilestone ? start : addDuration(start, parseDuration(t.duration!)),
+    finish,
     duration: t.duration,
-    isMilestone,
+    finishGiven,
+    isMilestone: finish.getTime() === start.getTime(),
     symbol: t.symbol,
     color: t.color,
   };
@@ -584,8 +596,9 @@ export function taskToData(t: Task): TaskData {
   return {
     id: t.id,
     text: t.text,
-    start_date: formatDate(t.start),
+    start_date: dateToData(t.start),
     ...(t.duration !== undefined && { duration: t.duration }),
+    ...(t.finishGiven && { finish_date: dateToData(t.finish) }),
     ...(t.symbol !== undefined && { symbol: t.symbol }),
     ...(t.color !== undefined && { color: t.color }),
   };
@@ -595,8 +608,8 @@ export function timelineToData(t: Timeline): TimelineData {
   return {
     id: t.id,
     name: t.name,
-    start_date: formatDate(t.start),
-    finish_date: formatDate(t.finish),
+    start_date: dateToData(t.start),
+    finish_date: dateToData(t.finish),
     entries: [
       ...t.entries.map((e): EntryData =>
         e.placement === "on"

@@ -48,13 +48,21 @@ export interface ViewData {
   selection?: boolean;
 }
 
-/** A task's finish date is not stored: it is `start_date + duration`. */
+/**
+ * A task's finish is `start_date + duration`, or given as `finish_date`
+ * (one or the other, not both). Dates are ISO 8601: `YYYY-MM-DD`,
+ * `YYYY-MM-DDTHH:mm`, or a full timestamp such as `2026-04-01T09:30:00Z` or
+ * `2026-04-01T09:30:00+02:00`. Times with a zone are converted to UTC;
+ * times without one are read as UTC.
+ */
 export interface TaskData {
   id: Id;
   text: string;
   start_date: string;
-  /** A whole number plus `h`, `d`, `w`, `m` or `y`. Missing or zero means milestone. */
+  /** A whole number plus `h`, `d`, `w`, `m` or `y`. Missing or zero (and no `finish_date`) means milestone. */
   duration?: string;
+  /** The finish date, instead of a `duration`. Not before `start_date`; equal to it means milestone. */
+  finish_date?: string;
   /** Overrides the view's `milestone_symbol` for this task. */
   symbol?: MilestoneSymbol;
   /**
@@ -94,7 +102,7 @@ export type EntryData = TaskEntryData | MarkerEntryData;
 export interface MarkerData {
   id: Id;
   text: string;
-  /** ISO 8601: `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm`. */
+  /** ISO 8601, as for task dates. */
   date: string;
   /** `true`: shown on every timeline. `false` (default): only on timelines with a `{ marker: id }` entry. */
   global?: boolean;
@@ -111,7 +119,7 @@ export interface MarkerData {
 export interface TimelineData {
   id: Id;
   name: string;
-  /** The timeline's time range. ISO 8601: `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm`. */
+  /** The timeline's time range. ISO 8601, as for task dates. */
   start_date: string;
   finish_date: string;
   entries: EntryData[];

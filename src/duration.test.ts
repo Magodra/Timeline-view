@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDate, parseDate } from "./dates";
+import { dateToData, formatDate, parseDate } from "./dates";
 import { addDuration, isMilestoneDuration, parseDuration } from "./duration";
 
 const add = (start: string, duration: string) => formatDate(addDuration(parseDate(start), parseDuration(duration)));
@@ -11,9 +11,40 @@ describe("parseDate / formatDate", () => {
   });
 
   it("rejects ambiguous or impossible dates", () => {
-    expect(() => parseDate("01-04-2026")).toThrow();
-    expect(() => parseDate("2026-02-30")).toThrow();
-    expect(() => parseDate("2026-04-01T24:00")).toThrow();
+    for (const bad of [
+      "01-04-2026",
+      "2026-02-30",
+      "2026-04-01T24:00",
+      "2026-04-01T10:00:60",
+      "2026-04-01Z",
+      "2026-04-01T10:00+25:00",
+      "2026-04-01T10:00 Z",
+      "2026-04-01T10",
+    ]) {
+      expect(() => parseDate(bad), bad).toThrow();
+    }
+  });
+
+  it("reads full ISO timestamps, converting a zone to UTC", () => {
+    const iso = (text: string) => parseDate(text).toISOString();
+    expect(iso("2026-04-01T09:30:00Z")).toBe("2026-04-01T09:30:00.000Z");
+    expect(iso("2026-04-01T09:30:15.250Z")).toBe("2026-04-01T09:30:15.250Z");
+    expect(iso("2026-04-01T09:30:00+02:00")).toBe("2026-04-01T07:30:00.000Z");
+    expect(iso("2026-04-01T23:30-0130")).toBe("2026-04-02T01:00:00.000Z");
+    expect(iso("2026-04-01T09:30+02")).toBe("2026-04-01T07:30:00.000Z");
+    // Without a zone, a time is UTC, as before.
+    expect(iso("2026-04-01T09:30")).toBe("2026-04-01T09:30:00.000Z");
+  });
+
+  it("shows seconds only when they aren't zero", () => {
+    expect(formatDate(parseDate("2026-04-01T00:00:00Z"))).toBe("2026-04-01");
+    expect(formatDate(parseDate("2026-04-01T09:30:00+02:00"))).toBe("2026-04-01T07:30");
+    expect(formatDate(parseDate("2026-04-01T09:30:15Z"))).toBe("2026-04-01T09:30:15");
+  });
+
+  it("writes a parsed date back as it was given, and a computed one formatted", () => {
+    expect(dateToData(parseDate("2026-04-01T09:30:00+02:00"))).toBe("2026-04-01T09:30:00+02:00");
+    expect(dateToData(new Date(Date.UTC(2026, 3, 1, 7, 30)))).toBe("2026-04-01T07:30");
   });
 });
 

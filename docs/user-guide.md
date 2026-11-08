@@ -45,7 +45,7 @@ An entry can't have both `line` and `callout_offset`. One task can appear on sev
   ],
   timelines: [
     { id: 1, name: "Project",
-      start_date: "2026-03-01",       // ISO 8601: YYYY-MM-DD or YYYY-MM-DDTHH:mm
+      start_date: "2026-03-01",       // ISO 8601: YYYY-MM-DD, YYYY-MM-DDTHH:mm or a full timestamp (see Dates)
       finish_date: "2026-05-01",
       entries: [
       { task: 1, line: 1 },                                 // bar line 1
@@ -61,7 +61,13 @@ An entry can't have both `line` and `callout_offset`. One task can appear on sev
 
 ### Tasks and milestones
 
-A task's finish date is its `start_date` plus its `duration`; it is calculated, not stored. A task with no `duration`, or a zero one, is a **milestone** and is drawn as a symbol. Otherwise it is drawn as a bar from its start date to its finish date.
+A task's finish is either its `start_date` plus its `duration`, or a `finish_date` you give instead. Use one or the other, not both. A task with neither, a zero `duration`, or a `finish_date` equal to its `start_date` is a **milestone** and is drawn as a symbol. Otherwise it is drawn as a bar from its start date to its finish date.
+
+```js
+{ id: 1, text: "Build", start_date: "2026-04-01", duration: "2w" },
+{ id: 2, text: "Review", start_date: "2026-04-15", finish_date: "2026-04-17" },
+{ id: 3, text: "Release", start_date: "2026-04-20" }   // milestone
+```
 
 `duration` is a whole number plus a unit:
 
@@ -74,6 +80,19 @@ A task's finish date is its `start_date` plus its `duration`; it is calculated, 
 | `y`  | years   | `"1y"`  |
 
 Months and years follow the calendar: one month from 31 January ends on 28 February.
+
+### Dates
+
+Every date (a task's `start_date` and `finish_date`, a timeline's range, a marker's `date`) is ISO 8601, in one of these forms:
+
+| Form | Example |
+|------|---------|
+| A date | `"2026-04-01"` |
+| A date and time | `"2026-04-01T09:30"` |
+| With seconds, and a fraction | `"2026-04-01T09:30:15"`, `"2026-04-01T09:30:15.250"` |
+| With a zone: `Z` (UTC) or an offset | `"2026-04-01T09:30:00Z"`, `"2026-04-01T09:30:00+02:00"` |
+
+The view works in UTC. A time with a zone is converted to UTC; a date, or a time without a zone, is read as UTC. So `"2026-04-01T09:30:00+02:00"` is drawn at 07:30, and labels show it as `2026-04-01T07:30`. `serialize()` returns each date exactly as you gave it, so timestamps from your backend (for example from `toISOString()`) go back unchanged.
 
 ### The bar
 

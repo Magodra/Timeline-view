@@ -34,6 +34,40 @@ const entry = (m: TimelineModel, timelineId: number, task: number) =>
   entries(m, timelineId).find((e) => e.task === task);
 
 describe("fromData", () => {
+  it("takes a task's finish_date instead of a duration, and writes it back", () => {
+    const data = sample();
+    data.tasks.push(
+      { id: 4, text: "Dated", start_date: "2026-04-01T08:00:00Z", finish_date: "2026-04-03T17:00:00+02:00" },
+      { id: 5, text: "Same day", start_date: "2026-04-05", finish_date: "2026-04-05" },
+    );
+    const m = TimelineModel.fromData(data);
+    expect(m.findTask(4)!.finish.toISOString()).toBe("2026-04-03T15:00:00.000Z");
+    expect(m.findTask(4)!.isMilestone).toBe(false);
+    expect(m.findTask(5)!.isMilestone).toBe(true);
+    expect(m.toData().tasks.slice(3)).toEqual(data.tasks.slice(3));
+  });
+
+  it("writes timestamps back as given", () => {
+    const data = sample();
+    data.tasks[0].start_date = "2026-04-01T09:30:00.000Z";
+    data.timelines[0].start_date = "2026-03-01T00:00:00+01:00";
+    data.markers = [{ id: 1, text: "Now", date: "2026-04-02T12:00:00Z", marker_offset: { x: 0, y: -16 } }];
+    expect(TimelineModel.fromData(data).toData()).toMatchObject({
+      tasks: [{ start_date: "2026-04-01T09:30:00.000Z" }, {}, {}],
+      timelines: [{ start_date: "2026-03-01T00:00:00+01:00" }, {}],
+      markers: [{ date: "2026-04-02T12:00:00Z" }],
+    });
+  });
+
+  it("rejects a task with both duration and finish_date, or finishing before it starts", () => {
+    const both = sample();
+    both.tasks[0].finish_date = "2026-04-05";
+    expect(() => TimelineModel.fromData(both)).toThrow(/not both/);
+    const backwards = sample();
+    backwards.tasks[1].finish_date = "2026-04-09";
+    expect(() => TimelineModel.fromData(backwards)).toThrow(/before start_date/);
+  });
+
   it("derives task kind and finish date from the duration", () => {
     const m = TimelineModel.fromData(sample());
     expect(m.findTask(1)!.isMilestone).toBe(false);
