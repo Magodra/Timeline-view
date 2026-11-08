@@ -14,7 +14,7 @@ if (!version) {
 
 const readme = fileURLToPath(new URL("../README.md", import.meta.url));
 const text = readFileSync(readme, "utf8");
-const updated = text.replace(/\/(blob|raw)\/([^/]+)\//g, `/$1/${version}/`);
+const updated = text.replace(/\/(blob|raw)\/([^/]+)\//g, `/$1/v${version}/`);
 
 if (updated !== text) {
     writeFileSync(readme, updated);
