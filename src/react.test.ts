@@ -115,6 +115,15 @@ describe("Timeline (React)", () => {
     ]);
   });
 
+  it("writes dates with formatDate, and redraws when it changes", () => {
+    show({ data: sample(), formatDate: (date) => `D${date.getUTCDate()}` });
+    expect(host.querySelector(".tlv-date-value")!.textContent).toBe("D1");
+    show({ data: sample(), formatDate: (date) => `E${date.getUTCDate()}` });
+    expect(host.querySelector(".tlv-date-value")!.textContent).toBe("E1");
+    show({ data: sample() });
+    expect(host.querySelector(".tlv-date-value")!.textContent).toBe("2026-03-01");
+  });
+
   it("reports invalid data to onError", () => {
     const onError = vi.fn();
     const bad = sample();

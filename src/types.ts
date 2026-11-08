@@ -135,6 +135,41 @@ export interface TimelineViewData {
   markers?: MarkerData[];
 }
 
+/** Which date a `format_date` call is for. */
+export type DateKind = "task_start" | "task_finish" | "milestone" | "timeline_start" | "timeline_finish" | "marker";
+
+export interface DateFormatInfo {
+  kind: DateKind;
+  /**
+   * The value has no time of day (`"2026-04-01"`): a calendar date, stored as
+   * midnight UTC. Format it in UTC (for example `timeZone: "UTC"` with
+   * `Intl.DateTimeFormat`); in a time zone west of UTC it would show the day
+   * before. Values with a time are moments, fine to show in any zone.
+   */
+  date_only: boolean;
+}
+
+/** Formats a date for display: the `format_date` option. */
+export type DateFormatter = (date: Date, info: DateFormatInfo) => string;
+
+export interface TickFormatInfo {
+  /** The view's scale: each tick starts an hour, day, ISO week, month or year. */
+  scale: Scale;
+  /**
+   * The first tick, or one that starts a new year (month scale) or day (hour
+   * scale). The default labels add the year or date to these, and they are
+   * the last to be hidden when labels don't fit.
+   */
+  major: boolean;
+}
+
+/**
+ * Formats a time-scale label: the `format_tick` option. `date` is the start
+ * of the period in UTC (the scale's periods are UTC), so format it with
+ * `timeZone: "UTC"` to label the right period.
+ */
+export type TickFormatter = (date: Date, info: TickFormatInfo) => string;
+
 /** Body of `PATCH .../entries/{task_id}`, minus `version`. Send only what changes. */
 export interface MovePatchData {
   timeline_id?: Id;

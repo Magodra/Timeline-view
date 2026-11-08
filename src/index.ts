@@ -4,6 +4,7 @@ import {
   type TimelineEventName,
   type TimelineEvents,
   type TimelineHandlers,
+  type TimelineFormatters,
   type TimelineOptions,
 } from "./view";
 
@@ -25,6 +26,9 @@ export { parseDuration, addDuration } from "./duration";
 export {
   MoveCancelledError,
   TimelineView,
+  defaultFormatDate,
+  defaultFormatTick,
+  type TimelineFormatters,
   type EntryAddedEvent,
   type EntryMovedEvent,
   type MarkerAddedEvent,
@@ -32,6 +36,8 @@ export {
   type MarkerRemovedEvent,
   type MarkerUpdatedEvent,
   type MarkerVisibilityEvent,
+  type DraggingEndedEvent,
+  type DraggingEvent,
   type EntryRemovedEvent,
   type MoveFailedEvent,
   type SaveAction,
@@ -72,6 +78,8 @@ export const load = (viewId: Id) => instance().load(viewId);
 export const serialize = () => instance().serialize();
 export const toSVG = () => instance().toSVG();
 export const resize = () => instance().resize();
+export const isDragging = () => instance().isDragging();
+export const setFormatters = (formatters: TimelineFormatters) => instance().setFormatters(formatters);
 export const moveEntry = (timelineId: Id, taskId: Id, patch: MovePatchData) =>
   instance().moveEntry(timelineId, taskId, patch);
 export const addEntry = (task: Id | TaskData, target: EntryTargetData) => instance().addEntry(task, target);

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TaskEntryData, TimelineData, TimelineViewData } from "./types";
-import { TimelineView, type MoveFailedEvent } from "./view";
+import type { DateFormatter, TaskEntryData, TimelineData, TimelineViewData } from "./types";
+import { defaultFormatDate, defaultFormatTick, TimelineView, type MoveFailedEvent } from "./view";
 
 function sample(): TimelineViewData {
   return {
@@ -1373,5 +1373,170 @@ describe("updateTimeline", () => {
     await expect(view.updateTimeline(1, { finish_date: "2026-09-01" })).rejects.toMatchObject({ status: 500 });
     expect(view.serialize().timelines[0].finish_date).toBe("2026-07-01");
     expect(failed.mock.calls[0][0]).toMatchObject({ action: "update_timeline", timeline_id: 1 });
+  });
+});
+
+describe("isDragging and the dragging events", () => {
+  const Pointer = (globalThis.PointerEvent ?? MouseEvent) as typeof MouseEvent;
+  const fire = (target: EventTarget, type: string, x: number) =>
+    target.dispatchEvent(new Pointer(type, { bubbles: true, button: 0, clientX: x, clientY: 0 }));
+  // oxlint-disable-next-line typescript/unbound-method -- saved only to put it back on `document`
+  const original = document.elementsFromPoint;
+  afterEach(() => {
+    document.elementsFromPoint = original;
+  });
+
+  /** A view whose every point is over bar line 0 of timeline 1 (jsdom has no layout). */
+  function setUp() {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const log: string[] = [];
+    view.on("dragging_started", (e) => log.push(`started ${JSON.stringify(e)} dragging=${view.isDragging()}`));
+    view.on("dragging_ended", (e) => log.push(`ended ${JSON.stringify(e)} dragging=${view.isDragging()}`));
+    view.on("entry_moved", () => log.push(`moved dragging=${view.isDragging()}`));
+    const line = container.querySelector('.tlv-line[data-line="1"]:not(.tlv-line--new)')!;
+    document.elementsFromPoint = () => [line];
+    const task = container.querySelector('.tlv-task[data-task="1"]')!;
+    return { view, log, task };
+  }
+
+  it("starts once the pointer has moved past the threshold, and ends after the drop is applied", () => {
+    const { view, log, task } = setUp();
+    expect(view.isDragging()).toBe(false);
+    fire(task, "pointerdown", 10);
+    fire(window, "pointermove", 12); // within the threshold: not a drag yet
+    expect(view.isDragging()).toBe(false);
+    fire(window, "pointermove", 60);
+    expect(view.isDragging()).toBe(true);
+    fire(window, "pointermove", 80); // no second start
+    // The task is on line 1 (the only line); dropping on the new line below moves it.
+    document.elementsFromPoint = () => [container.querySelectorAll(".tlv-line--new")[1]];
+    fire(window, "pointerup", 80);
+
+    expect(view.isDragging()).toBe(false);
+    expect(log).toEqual([
+      'started {"kind":"entry","timeline_id":1,"task_id":1} dragging=true',
+      "moved dragging=false",
+      'ended {"kind":"entry","timeline_id":1,"task_id":1,"dropped":true} dragging=false',
+    ]);
+  });
+
+  it("reports a cancelled drag (Escape) as not dropped, and a click as no drag at all", () => {
+    const { view, log, task } = setUp();
+    fire(task, "pointerdown", 10);
+    fire(window, "pointermove", 60);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(view.isDragging()).toBe(false);
+    expect(log.at(-1)).toBe('ended {"kind":"entry","timeline_id":1,"task_id":1,"dropped":false} dragging=false');
+
+    log.length = 0;
+    fire(task, "pointerdown", 10);
+    fire(window, "pointerup", 11);
+    expect(log).toEqual([]);
+  });
+
+  it("ends a drag in progress when the view is destroyed", () => {
+    const { view, log, task } = setUp();
+    fire(task, "pointerdown", 10);
+    fire(window, "pointermove", 60);
+    view.destroy();
+    expect(log.at(-1)).toBe('ended {"kind":"entry","timeline_id":1,"task_id":1,"dropped":false} dragging=false');
+  });
+
+  it("reports a marker label drag with the marker's id", () => {
+    const data = sample();
+    data.markers = [{ id: "m", text: "Kick-off", date: "2026-03-10", global: true }];
+    const view = new TimelineView("tl");
+    view.parse(data);
+    const events: unknown[] = [];
+    view.on("dragging_started", (e) => events.push(e));
+    const label = container.querySelector('.tlv-marker-label[data-marker="m"]')!;
+    fire(label, "pointerdown", 10);
+    fire(window, "pointermove", 60);
+    expect(events).toEqual([{ kind: "marker", marker_id: "m" }]);
+    fire(window, "pointercancel", 60);
+    expect(view.isDragging()).toBe(false);
+  });
+});
+
+describe("date and time-scale formatters", () => {
+  const texts = (selector: string) => [...container.querySelectorAll<HTMLElement>(selector)].map((n) => n.textContent);
+  const withAll = (): TimelineViewData => {
+    const data = sample();
+    data.view.scale = "month";
+    data.tasks.push({ id: 3, text: "Call", start_date: "2026-04-02T09:30:00Z", duration: "2h" });
+    data.timelines[0].entries.push({ task: 3, callout_offset: { x: 0, y: -40 } }, { marker: "m" });
+    data.markers = [{ id: "m", text: "Kick-off", date: "2026-03-10" }];
+    return data;
+  };
+
+  it("uses format_date for every displayed date, telling which date it is and whether it has a time", () => {
+    const calls: string[] = [];
+    const view = new TimelineView("tl", {
+      format_date: (date, info) => {
+        calls.push(`${info.kind}:${info.date_only}:${date.toISOString()}`);
+        return `<${info.kind}>`;
+      },
+    });
+    view.parse(withAll());
+
+    expect(texts(".tlv-date-value")).toEqual(["<timeline_start>", "<timeline_finish>"]);
+    // The task's label is above the bar, the milestone's below: above comes first.
+    expect(texts(".tlv-callout .tlv-callout-dates")).toEqual(["<task_start> – <task_finish>", "<milestone>"]);
+    expect(texts(".tlv-marker-label .tlv-callout-dates")).toEqual(["<marker>"]);
+    expect(container.querySelector<HTMLElement>('.tlv-task[data-task="1"]')!.title).toBe("Task #1 (<task_start> – <task_finish>)");
+    // A plain date is date_only; a time (or a finish reached by hours) is not.
+    expect(calls).toContain("timeline_start:true:2026-03-01T00:00:00.000Z");
+    expect(calls).toContain("task_start:false:2026-04-02T09:30:00.000Z");
+    expect(calls).toContain("task_finish:false:2026-04-02T11:30:00.000Z");
+    expect(calls).toContain("marker:true:2026-03-10T00:00:00.000Z");
+  });
+
+  it("uses format_tick for the time scale, with the UTC period start, the scale and whether it is major", () => {
+    const view = new TimelineView("tl", {
+      format_tick: (date, info) => `${info.scale}${info.major ? "*" : ""}${date.toISOString().slice(0, 7)}`,
+    });
+    view.parse(withAll());
+    expect(texts(".tlv-tick")).toEqual(["month*2026-03", "month2026-04"]);
+  });
+
+  it("works with Intl formatting, keeping plain dates on their calendar day", () => {
+    // Formats moments in a zone west of UTC, but plain dates in UTC, as DateFormatInfo advises.
+    const format_date: DateFormatter = (date, info) =>
+      new Intl.DateTimeFormat("en-GB", {
+        dateStyle: "medium",
+        ...(info.date_only ? { timeZone: "UTC" } : { timeStyle: "short", timeZone: "America/New_York" }),
+      }).format(date);
+    const view = new TimelineView("tl", { format_date });
+    view.parse(withAll());
+    expect(texts(".tlv-date-value")).toEqual(["1 Mar 2026", "1 May 2026"]);
+    expect(texts(".tlv-callout .tlv-callout-dates")).toEqual(["2 Apr 2026, 05:30 – 2 Apr 2026, 07:30", "10 Apr 2026"]);
+  });
+
+  it("falls back to the built-in format when a formatter throws, and logs it", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const view = new TimelineView("tl", {
+      format_date: () => {
+        throw new Error("broken");
+      },
+    });
+    view.parse(sample());
+    expect(texts(".tlv-date-value")).toEqual(["2026-03-01", "2026-05-01"]);
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("changes formatters with setFormatters, and goes back to the built-in format with undefined", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    view.setFormatters({ format_date: (date) => `d${date.getUTCDate()}` });
+    expect(texts(".tlv-date-value")).toEqual(["d1", "d1"]);
+    view.setFormatters({ format_tick: () => "t" }); // keeps format_date
+    expect(texts(".tlv-date-value")).toEqual(["d1", "d1"]);
+    expect(new Set(texts(".tlv-tick"))).toEqual(new Set(["t"]));
+    view.setFormatters({ format_date: undefined });
+    expect(texts(".tlv-date-value")).toEqual(["2026-03-01", "2026-05-01"]);
+    expect(defaultFormatTick(new Date(Date.UTC(2026, 0, 1)), { scale: "month", major: true })).toBe("Jan 2026");
+    expect(defaultFormatDate(new Date(Date.UTC(2026, 0, 1, 9)), { kind: "marker", date_only: false })).toBe("2026-01-01T09:00");
   });
 });

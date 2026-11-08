@@ -94,6 +94,45 @@ Every date (a task's `start_date` and `finish_date`, a timeline's range, a marke
 
 The view works in UTC. A time with a zone is converted to UTC; a date, or a time without a zone, is read as UTC. So `"2026-04-01T09:30:00+02:00"` is drawn at 07:30, and labels show it as `2026-04-01T07:30`. `serialize()` returns each date exactly as you gave it, so timestamps from your backend (for example from `toISOString()`) go back unchanged.
 
+### Showing dates your way
+
+By default the view writes dates as `2026-04-01` (and times in UTC, `2026-04-01T07:30`), and the time scale in English ("Jan 2026", "Feb"). To match the rest of your app, pass your own formatters when you create the view:
+
+```js
+timeline.init("timeline_here", {
+  // Every date shown: callout labels, tooltips, Start/Finish, marker labels.
+  format_date: (date, info) => formatForDisplay(date, info),
+  // The time scale's labels.
+  format_tick: (date, info) =>
+    new Intl.DateTimeFormat(navigator.language, {
+      timeZone: "UTC",
+      month: "short",
+      ...(info.major && { year: "numeric" }),
+    }).format(date),
+});
+```
+
+`format_date(date, info)` gets a `Date` and `info`:
+
+| Field | Meaning |
+|-------|---------|
+| `kind` | Which date: `task_start`, `task_finish`, `milestone`, `timeline_start`, `timeline_finish` or `marker`. |
+| `date_only` | `true` for a value without a time of day, such as `"2026-04-01"`. |
+
+**Plain dates are calendar days, not moments.** `"2026-04-01"` is stored as midnight UTC, so formatting it in the user's time zone shows 31 March anywhere west of UTC. Format `date_only` values with `timeZone: "UTC"`, and only values with a time in the user's zone:
+
+```js
+const formatForDisplay = (date, info) =>
+  new Intl.DateTimeFormat(navigator.language, info.date_only
+    ? { dateStyle: "medium", timeZone: "UTC" }                 // the calendar day as written
+    : { dateStyle: "medium", timeStyle: "short" }              // a moment, in the user's zone
+  ).format(date);
+```
+
+`format_tick(date, info)` gets the start of the period the label marks, in UTC (the scale's periods are UTC days, weeks, months and years), with `info.scale` and `info.major` (the first label, and each new year on a month scale or new day on an hour scale; the default labels add the year or date to those, and they are kept longest when labels don't fit). Format it with `timeZone: "UTC"` too, or a label can name the period before.
+
+Leave either out for the built-in format; `defaultFormatDate` and `defaultFormatTick` are exported if you want to fall back to them for some cases. A formatter that throws, or returns something other than a string, is logged and the built-in format is used for that label. `timeline.setFormatters({ format_date, format_tick })` changes them later and redraws (pass `undefined` for one to go back to the built-in format). The positions on the bar don't change, only the text; `toSVG()` exports the text as shown.
+
 ### The bar
 
 The time scale on top of the bar shades its periods (days, weeks, months, ...) alternately light and darker. Beside the bar, the timeline's start date is shown under "Start" and its finish date under "Finish". Set `show_dates: false` to hide them and give the bar the full width.
@@ -243,6 +282,19 @@ The number of bar lines comes from the entries: one more than the highest `line`
 
 Dragging doesn't change a task's dates.
 
+A press becomes a drag once the pointer has moved a few pixels; released before that, it's a click. `timeline.isDragging()` tells whether a drag is in progress, for example to hold back your own updates or keyboard shortcuts until it's over. Two events mark a drag's start and end:
+
+```js
+timeline.on("dragging_started", (e) => {
+  // e.kind: "entry" (with e.timeline_id, e.task_id) or "marker" (with e.marker_id)
+});
+timeline.on("dragging_ended", (e) => {
+  // the same, plus e.dropped: false when cancelled (Escape) or released where nothing can go
+});
+```
+
+`dragging_ended` fires after the drop has been applied, so after its `entry_moved` (or `marker_moved`), and `isDragging()` is already false in both. A drag cancelled by Escape, a cancelled pointer, or the view being destroyed still ends with `dragging_ended`. Drags you run yourself from outside the view (with `targetAt`) don't count.
+
 ## Adding entries from outside the view
 
 To let users drag items from your own page (a backlog list, a search result) onto the view, handle the drag yourself and ask the view where the pointer is. [examples/add.html](../examples/add.html) is a complete page.
@@ -306,6 +358,7 @@ function Plan({ initialData }) {
 | Prop | Meaning |
 |------|---------|
 | `data` | The data to show, as for `parse()`. It is loaded when the component mounts and again whenever you pass a different object; re-rendering with the same object doesn't reload it. |
+| `formatDate`, `formatTick` | As the `format_date` and `format_tick` options (see [Showing dates your way](#showing-dates-your-way)). Changing them redraws the view. |
 | `apiUrl`, `fetch` | As the `api_url` and `fetch` options: with `apiUrl`, changes are saved to the REST backend. Changing either creates a new view. |
 | `viewId` | With `apiUrl`: the view to load from the backend (`load()`), again when it changes. |
 | `on...` | Every event as a prop: `onEntryMoved` for `entry_moved`, `onSaveFailed` for `save_failed`, and so on, plus `onTaskClick`, `onTimelineClick`, `onTaskSelected` and `onTimelineSelected`. The current handler is always called; passing a new function doesn't re-subscribe anything. |
@@ -472,6 +525,8 @@ timeline.attachEvent("onTimelineSelected", (ids) => {
 
 ```js
 const off = timeline.on("entry_moved", (e) => { /* e.timeline_id, e.task_id, e.patch */ });
+timeline.on("dragging_started", (e) => { /* e.kind, e.timeline_id + e.task_id, or e.marker_id */ });
+timeline.on("dragging_ended", (e) => { /* the same, plus e.dropped */ });
 timeline.on("move_failed", (e) => { /* e.error; the view already shows the restored state */ });
 timeline.on("marker_moved", (e) => { /* e.marker_id, e.marker_offset: a marker label was moved */ });
 timeline.on("marker_updated", (e) => { /* e.marker_id, e.marker, e.old_marker */ });  // also marker_added, marker_removed, marker_shown, marker_hidden

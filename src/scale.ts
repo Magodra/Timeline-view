@@ -107,8 +107,8 @@ function isMajor(date: Date, scale: Scale, isFirst: boolean): boolean {
   return false;
 }
 
-/** A major tick shows the year (month scale) or date (hour scale) for context. */
-function label(date: Date, scale: Scale, major: boolean): string {
+/** The default tick label. A major tick shows the year (month scale) or date (hour scale) for context. */
+export function label(date: Date, scale: Scale, major: boolean): string {
   switch (scale) {
     case "hour": {
       const time = `${String(date.getUTCHours()).padStart(2, "0")}:00`;

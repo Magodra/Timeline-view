@@ -19,6 +19,19 @@ export interface MarkerDropEvent {
   offset: Offset;
 }
 
+/** What is being dragged, in the DOM's string form: an entry (timeline and task) or a marker's label. */
+export interface DragSource {
+  timeline?: string;
+  task?: string;
+  marker?: string;
+}
+
+/** Called when a press turns into a drag, and when the drag ends (`dropped`: released on a target, not cancelled). */
+export interface DragHooks {
+  onDragStart?: (source: DragSource) => void;
+  onDragEnd?: (source: DragSource, dropped: boolean) => void;
+}
+
 /** Pointer travel, in px, before a press turns into a drag. */
 const DRAG_THRESHOLD = 4;
 
@@ -150,8 +163,11 @@ export function attachDrag(
   onClick?: (entry: HTMLElement, event: PointerEvent) => void,
   onBackgroundClick?: (target: HTMLElement, event: PointerEvent) => void,
   onMarkerDrop?: (event: MarkerDropEvent) => void,
+  hooks: DragHooks = {},
 ): () => void {
   let cleanup: (() => void) | undefined;
+  /** Cancels the press or drag in progress, ending it as Escape does. */
+  let abort: (() => void) | undefined;
 
   /** A press on a timeline's background: a click if released without moving. */
   const trackBackgroundClick = (down: PointerEvent, target: HTMLElement) => {
@@ -192,6 +208,8 @@ export function attachDrag(
     // A marker's label can only sit at one end of its line: above the topmost
     // bar or below the bottommost. Its drop target is that area.
     const marker = source.dataset.marker;
+    const dragSource: DragSource =
+      marker !== undefined ? { marker } : { timeline: source.dataset.timeline, task: source.dataset.task };
     const markerTarget = (x: number, y: number) => {
       const node = targetElementAt(root, x, y);
       const side = sideAt(node, y);
@@ -217,6 +235,7 @@ export function attachDrag(
         root.append(ghost);
         source.classList.add("tlv-dragging");
         root.classList.add("tlv--dragging");
+        hooks.onDragStart?.(dragSource);
       }
       ghost.style.left = `${move.clientX - grab.x}px`;
       ghost.style.top = `${move.clientY - grab.y}px`;
@@ -231,21 +250,29 @@ export function attachDrag(
       const node = up && ghost ? targetElementAt(root, up.clientX, up.clientY) : null;
       const box = ghost?.getBoundingClientRect();
       const wasDrag = ghost !== undefined;
+      // Ends the drag first (the view's isDragging() is false from here on),
+      // then applies the drop, then reports the end.
       cleanup?.();
       // Released without moving past the drag threshold: a click.
       if (up && !wasDrag) {
         onClick?.(source, up);
         return;
       }
-      if (!node || !box || !up) return;
+      if (!wasDrag) return;
+      const dropped = drop(up, node, box);
+      hooks.onDragEnd?.(dragSource, dropped);
+    };
+
+    /** Applies a drop; false if there is nothing to drop on (or the drag was cancelled). */
+    const drop = (up: PointerEvent | undefined, node: HTMLElement | null, box: DOMRect | undefined): boolean => {
+      if (!node || !box || !up) return false;
 
       if (marker !== undefined) {
         const home = markerTarget(up.clientX, up.clientY);
-        if (home) {
-          const offset = calloutOffset(box, home.area.getBoundingClientRect(), home.at, home.side);
-          onMarkerDrop?.({ marker, offset });
-        }
-        return;
+        if (!home) return false;
+        const offset = calloutOffset(box, home.area.getBoundingClientRect(), home.at, home.side);
+        onMarkerDrop?.({ marker, offset });
+        return true;
       }
 
       const target = targetOf(node);
@@ -257,6 +284,7 @@ export function attachDrag(
         event.offset = calloutOffset(dropped, node.getBoundingClientRect(), Number(source.dataset.at), target.placement);
       }
       onDrop(event);
+      return true;
     };
 
     const onUp = (up: PointerEvent) => finish(up);
@@ -269,6 +297,7 @@ export function attachDrag(
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
     window.addEventListener("keydown", onKey);
+    abort = () => finish();
     cleanup = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -279,12 +308,15 @@ export function attachDrag(
       source.classList.remove("tlv-dragging");
       root.classList.remove("tlv--dragging");
       cleanup = undefined;
+      abort = undefined;
     };
   };
 
   root.addEventListener("pointerdown", onPointerDown);
   return () => {
-    cleanup?.();
+    // A drag in progress is cancelled, so it still reports its end.
+    if (abort) abort();
+    else cleanup?.();
     root.removeEventListener("pointerdown", onPointerDown);
   };
 }

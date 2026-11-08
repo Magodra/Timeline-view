@@ -1,4 +1,6 @@
 import { formatDate } from "./dates";
+import type { DateKind, Scale } from "./types";
+import type { Tick } from "./scale";
 import { firstLine, lineCount, viewRange, type Entry, type Marker, type Task, type Timeline, type TimelineModel } from "./model";
 import { fraction, periodSerial, ticks } from "./scale";
 
@@ -30,12 +32,24 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/** How dates and time-scale labels are written; the view builds one from its options. */
+export interface Display {
+  date: (date: Date, kind: DateKind) => string;
+  tick: (tick: Tick, scale: Scale) => string;
+}
+
+/** The built-in formats: ISO-style dates in UTC, English month names. */
+export const defaultDisplay: Display = {
+  date: (date) => formatDate(date),
+  tick: (tick) => tick.label,
+};
+
 /** Replaces the contents of `root` with the rendered view. */
-export function render(root: HTMLElement, model: TimelineModel): void {
+export function render(root: HTMLElement, model: TimelineModel, display: Display = defaultDisplay): void {
   root.classList.add("tlv");
   root.classList.toggle("tlv--no-dates", !model.view.showDates);
   const markers = markerPlan(model);
-  root.replaceChildren(...model.timelines.map((t) => renderTimeline(model, t, markers.get(String(t.id)) ?? [])));
+  root.replaceChildren(...model.timelines.map((t) => renderTimeline(model, t, markers.get(String(t.id)) ?? [], display)));
   root.append(...markerLines(model, markers));
   // The view's name, if it has one, as a heading above the timelines.
   if (model.view.name.trim()) {
@@ -344,7 +358,7 @@ export function unwatchLayout(root: HTMLElement): void {
 }
 
 /** A marker's label, placed like a callout, with a connector from the line's end on the bar's edge. */
-function markerLabel(part: MarkerPart, placement: "above" | "below"): HTMLElement[] {
+function markerLabel(part: MarkerPart, placement: "above" | "below", display: Display): HTMLElement[] {
   const { marker, at } = part;
   const { x, y } = marker.offset;
   const connector = markerColor(el("div", "tlv-connector tlv-connector--marker"), marker);
@@ -357,12 +371,13 @@ function markerLabel(part: MarkerPart, placement: "above" | "below"): HTMLElemen
   box.style.marginLeft = `calc(${pct(at)} + ${x}px)`;
   if (placement === "above") box.style.marginBottom = `${-y}px`;
   else box.style.marginTop = `${y}px`;
-  box.title = `${marker.text} (${formatDate(marker.date)})`;
-  box.append(el("div", "tlv-callout-title", marker.text), el("div", "tlv-callout-dates", formatDate(marker.date)));
+  const date = display.date(marker.date, "marker");
+  box.title = `${marker.text} (${date})`;
+  box.append(el("div", "tlv-callout-title", marker.text), el("div", "tlv-callout-dates", date));
   return [connector, box];
 }
 
-function renderTimeline(model: TimelineModel, timeline: Timeline, markers: MarkerPart[]): HTMLElement {
+function renderTimeline(model: TimelineModel, timeline: Timeline, markers: MarkerPart[], display: Display): HTMLElement {
   const row = el("section", `tlv-timeline tlv-timeline--name-${model.view.namePosition}`);
   row.dataset.timeline = String(timeline.id);
   row.setAttribute("aria-label", timeline.name);
@@ -377,12 +392,12 @@ function renderTimeline(model: TimelineModel, timeline: Timeline, markers: Marke
     spanNode.style.marginLeft = pct(from);
     spanNode.style.width = pct(to - from);
   }
-  const above = renderCalloutArea(model, timeline, "above");
-  const bar = renderBar(model, timeline);
-  const below = renderCalloutArea(model, timeline, "below");
+  const above = renderCalloutArea(model, timeline, "above", display);
+  const bar = renderBar(model, timeline, display);
+  const below = renderCalloutArea(model, timeline, "below", display);
   spanNode.append(above, bar, below);
   for (const part of markers) {
-    if (part.label) (part.label === "above" ? above : below).append(...markerLabel(part, part.label));
+    if (part.label) (part.label === "above" ? above : below).append(...markerLabel(part, part.label, display));
   }
   const center = el("div", "tlv-center");
   center.append(spanNode);
@@ -400,21 +415,22 @@ function entryElement(className: string, timeline: Timeline, entry: Entry, at: n
   return node;
 }
 
-function taskDates(task: Task): string {
-  return task.isMilestone ? formatDate(task.start) : `${formatDate(task.start)} – ${formatDate(task.finish)}`;
+function taskDates(task: Task, display: Display): string {
+  if (task.isMilestone) return display.date(task.start, "milestone");
+  return `${display.date(task.start, "task_start")} – ${display.date(task.finish, "task_finish")}`;
 }
 
-function dateLabel(kind: "start" | "finish", caption: string, date: Date): HTMLElement {
+function dateLabel(kind: "start" | "finish", caption: string, date: Date, display: Display): HTMLElement {
   const node = el("div", `tlv-date tlv-date--${kind}`);
-  node.append(el("span", "tlv-date-caption", caption), el("span", "tlv-date-value", formatDate(date)));
+  node.append(el("span", "tlv-date-caption", caption), el("span", "tlv-date-value", display.date(date, kind === "start" ? "timeline_start" : "timeline_finish")));
   return node;
 }
 
-function renderBar(model: TimelineModel, timeline: Timeline): HTMLElement {
+function renderBar(model: TimelineModel, timeline: Timeline, display: Display): HTMLElement {
   const { scale, showDates } = model.view;
   const { start, finish } = timeline;
   const bar = el("div", "tlv-bar");
-  if (showDates) bar.append(dateLabel("start", "Start", start), dateLabel("finish", "Finish", finish));
+  if (showDates) bar.append(dateLabel("start", "Start", start, display), dateLabel("finish", "Finish", finish, display));
 
   // Time scale: periods between ticks, alternately light and darker, with the
   // tick labels on top. The shading follows the calendar period, so it lines
@@ -434,7 +450,7 @@ function renderBar(model: TimelineModel, timeline: Timeline): HTMLElement {
   }
   for (const tick of tickList) {
     if (tick.at >= 1) continue;
-    const t = el("span", tick.major ? "tlv-tick tlv-tick--major" : "tlv-tick", tick.label);
+    const t = el("span", tick.major ? "tlv-tick tlv-tick--major" : "tlv-tick", display.tick(tick, scale));
     t.style.left = pct(tick.at);
     scaleRow.append(t);
   }
@@ -458,7 +474,7 @@ function renderBar(model: TimelineModel, timeline: Timeline): HTMLElement {
   for (let line = first; line < lines; line++) {
     const node = lineNode(line, false);
     for (const entry of timeline.entries) {
-      if (entry.placement === "on" && entry.line === line) node.append(renderOnEntry(model, timeline, entry));
+      if (entry.placement === "on" && entry.line === line) node.append(renderOnEntry(model, timeline, entry, display));
     }
     track.append(node);
   }
@@ -468,10 +484,10 @@ function renderBar(model: TimelineModel, timeline: Timeline): HTMLElement {
   return bar;
 }
 
-function renderOnEntry(model: TimelineModel, timeline: Timeline, entry: Entry): HTMLElement {
+function renderOnEntry(model: TimelineModel, timeline: Timeline, entry: Entry, display: Display): HTMLElement {
   const task = model.findTask(entry.taskId)!;
   const { from, to, center, before, after } = span(timeline, task);
-  const title = `${task.text} (${taskDates(task)})`;
+  const title = `${task.text} (${taskDates(task, display)})`;
 
   if (task.isMilestone) {
     const node = entryElement("tlv-milestone", timeline, entry, center);
@@ -504,7 +520,7 @@ function renderOnEntry(model: TimelineModel, timeline: Timeline, entry: Entry): 
  * Each callout also gets a marker on the bar's edge: its milestone symbol, or
  * a short bar over the task's span with rounded outer corners.
  */
-function renderCalloutArea(model: TimelineModel, timeline: Timeline, placement: "above" | "below"): HTMLElement {
+function renderCalloutArea(model: TimelineModel, timeline: Timeline, placement: "above" | "below", display: Display): HTMLElement {
   const area = el("div", `tlv-area tlv-area--${placement}`);
   area.dataset.timeline = String(timeline.id);
   area.dataset.placement = placement;
@@ -540,8 +556,8 @@ function renderCalloutArea(model: TimelineModel, timeline: Timeline, placement: 
     // y is from the bar to the label's near edge: negative above, positive below.
     if (placement === "above") box.style.marginBottom = `${-y}px`;
     else box.style.marginTop = `${y}px`;
-    box.title = `${task.text} (${taskDates(task)})`;
-    box.append(el("div", "tlv-callout-title", task.text), el("div", "tlv-callout-dates", taskDates(task)));
+    box.title = `${task.text} (${taskDates(task, display)})`;
+    box.append(el("div", "tlv-callout-title", task.text), el("div", "tlv-callout-dates", taskDates(task, display)));
 
     area.append(marker, connector, box);
   }

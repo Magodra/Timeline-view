@@ -11,7 +11,15 @@
  * setup. React is an optional peer dependency: only this entry imports it.
  */
 import { createElement, forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSProperties } from "react";
-import { TimelineView, type Id, type TimelineEvents, type TimelineHandlers, type TimelineViewData } from "./index";
+import {
+  TimelineView,
+  type DateFormatter,
+  type Id,
+  type TickFormatter,
+  type TimelineEvents,
+  type TimelineHandlers,
+  type TimelineViewData,
+} from "./index";
 
 /** `entry_moved` → `EntryMoved`. */
 type Pascal<S extends string> = S extends `${infer Head}_${infer Tail}` ? `${Capitalize<Head>}${Pascal<Tail>}` : Capitalize<S>;
@@ -35,6 +43,10 @@ export interface TimelineProps extends TimelineEventProps, TimelineHandlerProps 
   apiUrl?: string;
   /** Replacement for `fetch` (for tests or a mock backend). Changing it creates a new view. */
   fetch?: typeof fetch;
+  /** How dates are written (the `format_date` option). Changing it redraws the view. */
+  formatDate?: DateFormatter;
+  /** How the time scale's labels are written (the `format_tick` option). Changing it redraws the view. */
+  formatTick?: TickFormatter;
   /** Called when `data` is invalid or `viewId` can't be loaded. Without it, the error is thrown (to an error boundary) or logged. */
   onError?: (error: unknown) => void;
   /** Passed to the view's container element. */
@@ -45,6 +57,8 @@ export interface TimelineProps extends TimelineEventProps, TimelineHandlerProps 
 /** Every view event, each with its prop. `satisfies` makes the compiler flag an event added to the view but not here. */
 const EVENT_PROPS = {
   entry_moved: "onEntryMoved",
+  dragging_started: "onDraggingStarted",
+  dragging_ended: "onDraggingEnded",
   move_failed: "onMoveFailed",
   marker_moved: "onMarkerMoved",
   entry_added: "onEntryAdded",
@@ -74,7 +88,7 @@ const HANDLER_PROPS = ["onTaskClick", "onTimelineClick", "onTaskSelected", "onTi
  * container"). Import `ar-timeline-view/timelineview.css` once in the app.
  */
 export const Timeline = forwardRef<TimelineView | null, TimelineProps>(function Timeline(props, ref) {
-  const { data, viewId, apiUrl, fetch: fetchImpl, className, style } = props;
+  const { data, viewId, apiUrl, fetch: fetchImpl, formatDate, formatTick, className, style } = props;
   const container = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<TimelineView | null>(null);
   // The latest props, so the view's listeners (subscribed once) always call the current handlers.
@@ -100,6 +114,11 @@ export const Timeline = forwardRef<TimelineView | null, TimelineProps>(function 
       setView(null);
     };
   }, [apiUrl, fetchImpl]);
+
+  // Before `data` is parsed (effects run in order), so the first render already uses them.
+  useEffect(() => {
+    view?.setFormatters({ format_date: formatDate, format_tick: formatTick });
+  }, [view, formatDate, formatTick]);
 
   const fail = (error: unknown) => {
     const onError = latest.current.onError;

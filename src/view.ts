@@ -1,5 +1,14 @@
 import { ApiError, RestClient } from "./api";
-import { attachDrag, calloutOffset, hitTarget, targetElement, type DropEvent, type DropTarget, type MarkerDropEvent } from "./drag";
+import {
+  attachDrag,
+  calloutOffset,
+  hitTarget,
+  targetElement,
+  type DragSource,
+  type DropEvent,
+  type DropTarget,
+  type MarkerDropEvent,
+} from "./drag";
 import {
   addTargetFromData,
   entryToData,
@@ -11,11 +20,13 @@ import {
   timelineToData,
   type Task,
 } from "./model";
-import { dateToData } from "./dates";
-import { attachAt, layout, render, unwatchLayout } from "./render";
+import { dateToData, formatDate } from "./dates";
+import { label as tickLabel } from "./scale";
+import { attachAt, defaultDisplay, layout, render, unwatchLayout, type Display } from "./render";
 import { toSVG } from "./svg";
 import type {
   AddEntryData,
+  DateFormatter,
   EntryTargetData,
   Id,
   MarkerData,
@@ -27,17 +38,37 @@ import type {
   TaskData,
   TaskEntryData,
   TaskPatchData,
+  TickFormatter,
   TimelineData,
   TimelineUpdateData,
   TimelineViewData,
 } from "./types";
 
-export interface TimelineOptions {
+export interface TimelineOptions extends TimelineFormatters {
   /** Base URL of the REST backend. Without it, changes are only reported through events. */
   api_url?: string;
   /** Replacement for `fetch`, mainly for tests and mock backends. */
   fetch?: typeof fetch;
 }
+
+/** How the view writes dates and time-scale labels. Leave one out for the built-in format. */
+export interface TimelineFormatters {
+  /**
+   * Writes the dates shown on callout labels, tooltips, the Start and
+   * Finish captions and marker labels. Default: `YYYY-MM-DD` (with the time
+   * in UTC when there is one). See `DateFormatInfo.date_only` for dates
+   * without a time.
+   */
+  format_date?: DateFormatter;
+  /** Writes the time scale's labels ("Jan 2026", "W12", ...). Default: English, as `defaultFormatTick`. */
+  format_tick?: TickFormatter;
+}
+
+/** The built-in date format: `YYYY-MM-DD`, plus `THH:mm` (UTC) when there is a time. For a formatter to fall back on. */
+export const defaultFormatDate: DateFormatter = (date) => formatDate(date);
+
+/** The built-in time-scale labels: "Jan 2026", "Feb", "W12", "14", "09:00". */
+export const defaultFormatTick: TickFormatter = (date, info) => tickLabel(date, info.scale, info.major);
 
 export interface EntryMovedEvent {
   timeline_id: Id;
@@ -171,6 +202,14 @@ export interface TimelineUpdatedEvent {
   old_timeline: TimelineData;
 }
 
+/** `dragging_started`: what the user started dragging. */
+export type DraggingEvent =
+  | { kind: "entry"; timeline_id: Id; task_id: Id }
+  | { kind: "marker"; marker_id: Id };
+
+/** `dragging_ended`: the drag, and whether it was dropped on a target (false when cancelled or released on nothing). */
+export type DraggingEndedEvent = DraggingEvent & { dropped: boolean };
+
 export interface SaveFailedEvent {
   action: SaveAction;
   /** The timeline the change was for; not set for `rename_view`. */
@@ -186,6 +225,17 @@ export interface SaveFailedEvent {
 export interface TimelineEvents {
   /** A move was applied on screen. Fired before the REST request, if any, is sent. */
   entry_moved: EntryMovedEvent;
+  /**
+   * The user started dragging an entry or a marker's label: the pointer moved
+   * far enough after pressing it. A press released before that is a click.
+   */
+  dragging_started: DraggingEvent;
+  /**
+   * The drag ended: released (`dropped: true` if on a target) or cancelled
+   * (Escape, a cancelled pointer, or the view destroyed). Fired after the
+   * drop is applied, so after its `entry_moved` or `marker_moved`.
+   */
+  dragging_ended: DraggingEndedEvent;
   /** A move was rejected, locally or by the server. The view shows the restored state. */
   move_failed: MoveFailedEvent;
   /**
@@ -238,6 +288,34 @@ export interface TimelineEvents {
    * after a 409. Entry moves report `move_failed` instead.
    */
   save_failed: SaveFailedEvent;
+}
+
+/**
+ * The view's `Display` from the host's formatters. A formatter that throws
+ * or returns a non-string is logged and the built-in format is used, so a
+ * bad formatter can't break rendering.
+ */
+function displayOf({ format_date, format_tick }: TimelineFormatters): Display {
+  const safe = <A extends unknown[]>(format: ((...args: A) => string) | undefined, fallback: (...args: A) => string) =>
+    format
+      ? (...args: A) => {
+          try {
+            const text = format(...args);
+            if (typeof text === "string") return text;
+            console.error("timeline view: a formatter returned", text, "instead of a string");
+          } catch (error) {
+            console.error("timeline view: a formatter threw", error);
+          }
+          return fallback(...args);
+        }
+      : fallback;
+  const date = safe(format_date, defaultFormatDate);
+  const tick = safe(format_tick, defaultFormatTick);
+  return {
+    // A date without a time has no "T" in its data form ("2026-04-01").
+    date: (value, kind) => date(value, { kind, date_only: !dateToData(value).includes("T") }),
+    tick: (t, scale) => tick(t.date, { scale, major: t.major }),
+  };
 }
 
 /** What a failed save was for. */
@@ -326,6 +404,9 @@ export class TimelineView {
   private generation = 0;
   /** The element `highlightTarget` marked, if any. */
   private highlighted?: HTMLElement;
+  /** How dates and scale labels are written (see `setFormatters`). */
+  private display: Display = defaultDisplay;
+  private formatters: TimelineFormatters = {};
 
   constructor(container: string | HTMLElement, options: TimelineOptions = {}) {
     const node = typeof container === "string" ? document.getElementById(container) : container;
@@ -334,13 +415,54 @@ export class TimelineView {
     }
     this.container = node;
     if (options.api_url) this.api = new RestClient(options.api_url, options.fetch);
+    this.formatters = { format_date: options.format_date, format_tick: options.format_tick };
+    this.display = displayOf(this.formatters);
     this.detachDrag = attachDrag(
       node,
       (e) => this.onDrop(e),
       (entry, e) => this.onEntryClick(entry, e),
       (target, e) => this.onBackgroundClick(target, e),
       (e) => this.onMarkerDrop(e),
+      {
+        onDragStart: (source) => this.emit("dragging_started", this.dragEvent(source)),
+        onDragEnd: (source, dropped) => this.emit("dragging_ended", { ...this.dragEvent(source), dropped }),
+      },
     );
+  }
+
+  /**
+   * Replaces the date and/or time-scale formatter (`format_date`,
+   * `format_tick`, as in the options) and redraws. Pass `undefined` for one
+   * to go back to the built-in format; leave a key out to keep the current one.
+   */
+  setFormatters(formatters: TimelineFormatters): void {
+    this.formatters = { ...this.formatters, ...formatters };
+    this.display = displayOf(this.formatters);
+    if (this.model) this.render();
+  }
+
+  /**
+   * Whether the user is dragging something in the view right now: an entry
+   * (bar, milestone or callout label) or a marker's label, from the moment
+   * the pointer has moved far enough to start a drag until it is released or
+   * the drag is cancelled. Drags the host runs from outside the view (with
+   * `targetAt`) don't count. False again before the drop is applied, so it
+   * is already false in `entry_moved` and `dragging_ended`.
+   */
+  isDragging(): boolean {
+    return this.container.classList.contains("tlv--dragging");
+  }
+
+  /** A drag's source with the model's own ids (the DOM holds them as strings). */
+  private dragEvent(source: DragSource): DraggingEvent {
+    const model = this.model;
+    if (source.marker !== undefined) {
+      const marker = model?.markers.find((m) => String(m.id) === source.marker);
+      return { kind: "marker", marker_id: marker?.id ?? source.marker };
+    }
+    const timeline = model?.timelines.find((t) => String(t.id) === source.timeline);
+    const task = model?.tasks.find((t) => String(t.id) === source.task);
+    return { kind: "entry", timeline_id: timeline?.id ?? source.timeline!, task_id: task?.id ?? source.task! };
   }
 
   /** Loads data in the public format and renders it. */
@@ -1258,7 +1380,7 @@ export class TimelineView {
   }
 
   private render(): void {
-    render(this.container, this.requireModel());
+    render(this.container, this.requireModel(), this.display);
     this.applySelection();
   }
 }
