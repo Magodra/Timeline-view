@@ -99,7 +99,7 @@ Works in current evergreen browsers (Chrome, Edge, Firefox, Safari).
 
 ## Links
 
-- Documentation: <https://github.com/Magodra/ar-timeline-view/>
+- Documentation: <https://github.com/Magodra/ar-timeline-view/tree/v1.0.6/>
 - Source and issues: <https://github.com/Magodra/ar-timeline-view>
 
 ## License
