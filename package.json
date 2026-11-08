@@ -1,6 +1,6 @@
 {
   "name": "ar-timeline-view",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "A web-based timeline component for displaying and editing timelines.",
   "license": "MIT",
   "type": "module",
