@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Timeline view - drag in from a list</title>
+    <script src="../dist/timelineview.js"></script>
+    <link href="../dist/timelineview.css" rel="stylesheet">
+    <link href="examples.css" rel="stylesheet">
+    <style>
+        .layout { display: flex; gap: 16px; align-items: flex-start; }
+        .layout > #timeline_here { flex: 1; min-width: 0; }
+        .backlog { flex: 0 0 200px; }
+        .backlog ul { margin: 0; padding: 0; list-style: none; }
+        .backlog h2 { margin: 0 0 8px; }
+        .backlog li {
+            margin-bottom: 6px; padding: 6px 10px;
+            border: 1px solid #d0d7de; border-radius: 6px;
+            cursor: grab; user-select: none; touch-action: none;
+        }
+        .backlog li small { display: block; opacity: 0.7; }
+        .backlog li.milestone::before { content: "◆ "; color: #d9822b; }
+        /* The copy that follows the pointer. pointer-events: none is good practice; targetAt() looks through it anyway. */
+        .backlog-ghost {
+            position: fixed; z-index: 10; pointer-events: none; opacity: 0.85;
+            padding: 6px 10px; border-radius: 6px; background: #2f6feb; color: white;
+        }
+        @media (max-width: 700px) { .layout { flex-direction: column; } .backlog { flex-basis: auto; width: 100%; } }
+    </style>
+</head>
+<body>
+    <h1>Drag in from a list</h1>
+    <p>Drag a task or milestone from the list onto a bar line, the half line above or below the bar's lines (opens a new line), or a callout area above or below a bar. The target under the pointer is highlighted. A task can go on several timelines, but only once on each. Press Escape to cancel.</p>
+    <p class="controls"><span id="status">Nothing added yet.</span></p>
+    <div class="layout">
+        <div class="backlog">
+            <h2>Backlog</h2>
+            <ul id="backlog"></ul>
+        </div>
+        <div id="timeline_here"></div>
+    </div>
+    <h2>Events</h2>
+    <pre id="log"></pre>
+    <script>
+        timeline.init("timeline_here");
+        timeline.parse({
+            view: { name: "Release plan", scale: "week" },
+            tasks: [
+                { id: 1, text: "Design", start_date: "2026-03-02", duration: "2w" }
+            ],
+            timelines: [
+                { id: 1, name: "Team A", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [{ task: 1 }] },
+                { id: 2, name: "Team B", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] }
+            ]
+        });
+
+        // Items the host app keeps outside the view, not yet in its data.
+        const backlog = [
+            { id: 101, text: "Build", start_date: "2026-03-16", duration: "3w" },
+            { id: 102, text: "Test", start_date: "2026-04-06", duration: "2w" },
+            { id: 103, text: "Docs", start_date: "2026-04-01", duration: "10d" },
+            { id: 104, text: "Beta", start_date: "2026-04-06" },
+            { id: 105, text: "Release", start_date: "2026-04-24", symbol: "star" }
+        ];
+
+        const list = document.getElementById("backlog");
+        for (const task of backlog) {
+            const item = document.createElement("li");
+            item.dataset.id = task.id;
+            if (!task.duration) item.className = "milestone";
+            item.textContent = task.text;
+            const dates = document.createElement("small");
+            dates.textContent = task.duration ? `${task.start_date}, ${task.duration}` : task.start_date;
+            item.append(dates);
+            list.append(item);
+        }
+
+        const status = document.getElementById("status");
+        const log = document.getElementById("log");
+
+        // The first drop passes the task's data, which adds it to the view;
+        // later drops (on other timelines) pass only its id.
+        const taskArg = (task) => timeline.serialize().tasks.some((t) => t.id === task.id) ? task.id : task;
+
+        // Dragging with pointer events: a ghost follows the pointer, targetAt()
+        // finds the drop target, highlightTarget() marks it, addEntry() drops.
+        list.addEventListener("pointerdown", (down) => {
+            const item = down.target.closest("li[data-id]");
+            if (!item || down.button !== 0) return;
+            down.preventDefault();
+            const task = backlog.find((t) => String(t.id) === item.dataset.id);
+            const ghost = document.createElement("div");
+            ghost.className = "backlog-ghost";
+            ghost.textContent = task.text;
+            document.body.append(ghost);
+            let target = null;
+
+            const move = (e) => {
+                ghost.style.left = `${e.clientX + 8}px`;
+                ghost.style.top = `${e.clientY + 8}px`;
+                target = timeline.targetAt(e.clientX, e.clientY, taskArg(task));
+                timeline.highlightTarget(target);
+            };
+            const end = (drop) => {
+                window.removeEventListener("pointermove", move);
+                window.removeEventListener("pointerup", up);
+                window.removeEventListener("pointercancel", cancel);
+                window.removeEventListener("keydown", key);
+                ghost.remove();
+                timeline.highlightTarget(null);
+                if (!drop || !target) return;
+                try {
+                    timeline.addEntry(taskArg(task), target);
+                } catch (error) {
+                    status.textContent = error.message;   // for example: already on that timeline
+                }
+            };
+            const up = (e) => { move(e); end(true); };
+            const cancel = () => end(false);
+            const key = (e) => { if (e.key === "Escape") end(false); };
+            window.addEventListener("pointermove", move);
+            window.addEventListener("pointerup", up);
+            window.addEventListener("pointercancel", cancel);
+            window.addEventListener("keydown", key);
+            move(down);
+        });
+
+        // The host saves additions itself: there is no REST call for them yet.
+        timeline.on("entry_added", (e) => {
+            status.textContent = `Added "${e.task.text}" to timeline ${e.timeline_id}${e.new_task ? " (new task)" : ""}.`;
+            log.textContent = JSON.stringify(e, null, 2);
+        });
+    </script>
+</body>
+</html>

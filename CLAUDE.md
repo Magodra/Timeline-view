@@ -64,7 +64,7 @@ Run `npm run lint` and `npm test` before calling a change done.
 - Public data format (what `parse()` takes and the REST API exchanges) uses `snake_case`. Internal TypeScript uses `camelCase`. Convert at the boundary in `model.ts`.
 - Dates in the data format are ISO 8601 (`YYYY-MM-DD`, or `YYYY-MM-DDTHH:mm` when hours matter). Internally all dates are UTC.
 - Line indexes are 0-based everywhere.
-- The move rules live in `TimelineModel.moveEntry` only. The UI, the REST client and the mock server in `examples/rest.html` all go through it. Change the rules there, and keep CLAUDE.md, `docs/api/openapi.yaml` and the tests in step.
+- The move rules live in `TimelineModel` only: `moveEntry` and `addEntry` share them through `placeEntry` in `model.ts`. The UI, the REST client and the mock server in `examples/rest.html` all go through it. Change the rules there, and keep CLAUDE.md, `docs/api/openapi.yaml` and the tests in step.
 - Keep runtime dependencies at zero; ask before adding one.
 
 ## Glossary and domain model
@@ -124,13 +124,14 @@ Duration format: a whole number plus a unit: `h` (hours), `d` (days), `w` (weeks
   - A drop outside every area (past the view's edge, on a name, or on the time scale) goes to the vertically nearest callout area, which grows to include the new position.
   - The number of bar lines is not part of the data: it is always calculated as the highest `line` the timeline's entries use, plus one, at least 1. Inserting a line shifts the lines below it down by one. After every move, the affected timelines are trimmed: blank lines above the first used line are removed by renumbering the entries so the first used line is 0, and blank lines after the last used line are not counted. Gaps between used lines stay. The bar never shows blank lines above the first used line, even in loaded data that has them.
   - Escape cancels a drag. Dropping does not change a task's dates.
+- **Drops from outside the view:** the host runs its own drag (for example from a backlog list) and calls `targetAt(x, y, task?)` for the drop target under the pointer (`null` outside the view's box; inside it, the same hit test as internal drags, looking through elements that aren't part of the view such as the host's ghost), `highlightTarget(target)` to show it (class `tlv-drop`, one at a time, cleared by a re-render), and `addEntry(task, target)` to drop. With `task`, a callout target gets a `callout_offset` with the label's corner at the point. See [examples/add.html](examples/add.html).
 
 ### Not built yet
 
 - Renaming, adding and removing timelines in the UI. Today these come only from the data. Reordering works through `moveTimelineUp`/`moveTimelineDown` (the host supplies the buttons), but there is no REST call to save the order (**TBD**).
 - Editing a task's dates or duration by dragging or resizing.
 - Keyboard and screen-reader support for moving entries.
-- REST endpoints for creating and editing tasks and timelines (**TBD**).
+- REST endpoints for creating and editing tasks and timelines, and for adding entries (`addEntry` only fires `entry_added`) (**TBD**).
 
 ## Data format
 
@@ -180,7 +181,10 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
 | `timeline.serialize()` | Returns the current data. |
 | `timeline.toSVG()` | Returns the view as a standalone SVG document (a string), as it looks on screen. The view must be rendered and visible. Saving it is up to the host page; see [examples/export.html](examples/export.html). |
 | `timeline.moveEntry(timeline_id, task_id, patch)` | Moves an entry, as a drop does. Takes the PATCH body below, without `version`. |
-| `timeline.on("entry_moved" \| "move_failed" \| "marker_moved", handler)` | Subscribes to move events. Returns an unsubscribe function. `marker_moved` gets `{ marker_id, marker_offset }`. |
+| `timeline.on("entry_moved" \| "move_failed" \| "marker_moved" \| "entry_added", handler)` | Subscribes to move events. Returns an unsubscribe function. `marker_moved` gets `{ marker_id, marker_offset }`; `entry_added` gets `{ timeline_id, task_id, task, new_task, entry, timeline }` (`timeline`: its full data after the add). |
+| `timeline.targetAt(x, y, task?)` | Hit test in client coordinates: the drop target `{ timeline_id, placement, line?, new_line?, callout_offset? }` at the point, or `null` outside the view. `task` (id or new task data) gives callout targets an offset. |
+| `timeline.highlightTarget(target \| null)` | Highlights a drop target as internal drags do, or removes the highlight. Returns `false` if the target isn't in the view. |
+| `timeline.addEntry(task, target)` | Adds a task (an existing id, or new task data, which is added to `tasks`) at a target, following the move rules; without `placement`, a `callout_offset` makes a callout, otherwise the bar (`line` default 0). Fires `entry_added`. Throws a `MoveError` (`not_found`, `conflict`, `invalid`) without changing anything. Not sent to the REST API (**TBD**). |
 | `timeline.setMarkerOffset(marker_id, { x, y })` | Moves a marker's label, as dragging it does. Fires `marker_moved`. |
 | `timeline.attachEvent(name, handler)` | Subscribes to a user event; returns an event id. Inside a `function` handler, `this` is the view. Events: `onTaskClick (task_id, event, timeline_id)`: a task bar, milestone or callout clicked without dragging. `onTimelineClick (timeline_id, event)`: a timeline clicked outside its tasks. `onTaskSelected (task_ids)`, `onTimelineSelected (timeline_ids)`: the selection changed; the lists hold every selected id. |
 | `timeline.selectTask(id, add?)`, `selectTimeline(id, add?)` | Selects only this item, or with `add` adds it to the selection (same kind only). Return `false` when `view.selection` is off. |

@@ -54,7 +54,10 @@ const verticalDistance = (rect: DOMRect, y: number) => Math.max(0, rect.top - y,
  * the vertically nearest callout area, which then grows to fit the label.
  */
 function targetElementAt(root: HTMLElement, x: number, y: number): HTMLElement | null {
-  const hit = document.elementFromPoint(x, y);
+  // The topmost element that is part of the view, so a host page's drag ghost
+  // over the view doesn't hide what is under it.
+  const hits = typeof document.elementsFromPoint === "function" ? document.elementsFromPoint(x, y) : [document.elementFromPoint(x, y)];
+  const hit = hits.find((n) => n && root.contains(n) && !n.closest(".tlv-ghost"));
   const direct = hit?.closest<HTMLElement>(".tlv-line, .tlv-area");
   if (direct && root.contains(direct)) return direct;
 
@@ -99,6 +102,31 @@ function markerHome(root: HTMLElement, marker: string, side: "above" | "below", 
   const a = area.getBoundingClientRect();
   const l = line.getBoundingClientRect();
   return { area, side, at: (l.left + l.width / 2 - a.left) / a.width };
+}
+
+/**
+ * Hit test for drops from outside the view: the bar line or callout area at
+ * the point (client coordinates), with its element. Inside the view but on
+ * no area (a name label, the time scale), the vertically nearest callout
+ * area. Outside the view's box: null.
+ */
+export function hitTarget(root: HTMLElement, x: number, y: number): { node: HTMLElement; target: DropTarget } | null {
+  const box = root.getBoundingClientRect();
+  if (x < box.left || x > box.right || y < box.top || y > box.bottom) return null;
+  const node = targetElementAt(root, x, y);
+  return node ? { node, target: targetOf(node) } : null;
+}
+
+/** The element for a drop target: a bar line (or half line) or a callout area. */
+export function targetElement(root: HTMLElement, target: DropTarget): HTMLElement | null {
+  const nodes = root.querySelectorAll<HTMLElement>(".tlv-line, .tlv-area");
+  for (const node of nodes) {
+    const t = targetOf(node);
+    if (t.timeline !== target.timeline || t.placement !== target.placement) continue;
+    if (t.placement !== "on" || target.placement !== "on") return node;
+    if (t.line === target.line && t.newLine === target.newLine) return node;
+  }
+  return null;
 }
 
 function targetOf(node: HTMLElement): DropTarget {

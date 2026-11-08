@@ -75,6 +75,23 @@ export interface MovePatch {
   calloutOffset?: Offset;
 }
 
+/** Where `addEntry` puts a task: a timeline, and optionally the move fields for the spot on it. */
+export interface AddTarget {
+  timelineId: Id;
+  placement?: Placement;
+  line?: number;
+  newLine?: boolean;
+  calloutOffset?: Offset;
+}
+
+export interface AddResult {
+  task: Task;
+  /** The task was new and has been added to the tasks. */
+  created: boolean;
+  /** The timeline the entry was added to, after trimming. */
+  timeline: Timeline;
+}
+
 /** Mirrors the REST status codes, so a local move fails the same way a server move would. */
 export type MoveErrorCode = "not_found" | "conflict" | "invalid";
 
@@ -291,37 +308,10 @@ export class TimelineModel {
     }
 
     const placement = patch.placement ?? entry.placement;
-    if (!PLACEMENTS.includes(placement)) {
-      throw new MoveError("invalid", `Unknown placement "${placement}"`);
-    }
-
-    let moved: Entry;
-    if (placement === "on") {
-      if (patch.calloutOffset !== undefined) {
-        throw new MoveError("invalid", "callout_offset is only valid above or below the bar");
-      }
-      const line = patch.line ?? (target === source && entry.placement === "on" ? entry.line : 0);
-      if (!isLineIndex(line)) throw new MoveError("invalid", "line must be a whole number ≥ 0");
-      const count = lineCount(target);
-      if (line > count) {
-        throw new MoveError("invalid", `line ${line} is past the bar's last line + 1 (${count})`);
-      }
-      if (patch.newLine !== undefined && typeof patch.newLine !== "boolean") {
-        throw new MoveError("invalid", "new_line must be true or false");
-      }
-      if (patch.newLine) {
-        for (const e of target.entries) if (e.placement === "on" && e.line >= line) e.line++;
-      }
-      moved = { taskId: entry.taskId, placement, line };
-    } else {
-      if (patch.line !== undefined || patch.newLine !== undefined) {
-        throw new MoveError("invalid", "callouts have no line; use callout_offset");
-      }
-      const offset = patch.calloutOffset ?? keptOffset(entry, placement);
-      const problem = offsetProblem(offset, placement);
-      if (problem) throw new MoveError("invalid", problem);
-      moved = { taskId: entry.taskId, placement, calloutOffset: { x: offset.x, y: offset.y } };
-    }
+    const moved = placeEntry(target, entry.taskId, placement, patch, {
+      line: target === source && entry.placement === "on" ? entry.line : 0,
+      offset: (side) => keptOffset(entry, side),
+    });
 
     if (target === source) {
       source.entries[index] = moved;
@@ -332,6 +322,46 @@ export class TimelineModel {
     trimLines(source);
     if (target !== source) trimLines(target);
     return target === source ? [source] : [source, target];
+  }
+
+  /**
+   * Adds a task to a timeline, as a drop from outside the view does. `task` is
+   * the id of a task the view already has, or a new task's data, which is
+   * validated and added to the tasks. The target follows the move rules:
+   * without `placement`, a `calloutOffset` makes a callout (side from its
+   * `y`), otherwise the entry goes on the bar, on `line` (default 0);
+   * `newLine` inserts a line there. A callout without an offset gets the
+   * default one. Nothing changes if it throws.
+   */
+  addEntry(task: Id | TaskData, target: AddTarget): AddResult {
+    const timeline = this.findTimeline(target.timelineId);
+    if (!timeline) throw new MoveError("not_found", `Timeline ${target.timelineId} not found`);
+
+    let found: Task | undefined;
+    let created = false;
+    if (typeof task === "object" && task !== null) {
+      if (this.findTask(task.id)) throw new MoveError("conflict", `Task ${task.id} already exists; add it by its id`);
+      try {
+        found = taskFromData(task);
+      } catch (error) {
+        throw new MoveError("invalid", error instanceof Error ? error.message : String(error));
+      }
+      created = true;
+    } else {
+      found = this.findTask(task);
+      if (!found) throw new MoveError("not_found", `Task ${task} not found`);
+    }
+    if (timeline.entries.some((e) => sameId(e.taskId, found.id))) {
+      throw new MoveError("conflict", `Task ${found.id} is already on timeline ${timeline.id}`);
+    }
+
+    const offset = target.calloutOffset;
+    const placement = target.placement ?? (offset === undefined ? "on" : isOffset(offset) && offset.y > 0 ? "below" : "above");
+    const entry = placeEntry(timeline, found.id, placement, target, { line: 0, offset: defaultOffset });
+    if (created) this.tasks.push(found);
+    timeline.entries.push(entry);
+    trimLines(timeline);
+    return { task: found, created, timeline };
   }
 
   /**
@@ -357,6 +387,50 @@ export class TimelineModel {
       else this.timelines.push(next);
     }
   }
+}
+
+/**
+ * The placement rules shared by moves and adds: validates `patch` for an
+ * entry of `taskId` going to `placement` on `target`, opens a new line if
+ * asked, and returns the entry (not yet inserted). `defaults` give the line
+ * and callout offset when the patch leaves them out. Throws before changing
+ * anything if the patch is invalid.
+ */
+function placeEntry(
+  target: Timeline,
+  taskId: Id,
+  placement: Placement,
+  patch: Omit<MovePatch, "timelineId">,
+  defaults: { line: number; offset: (placement: "above" | "below") => Offset },
+): Entry {
+  if (!PLACEMENTS.includes(placement)) {
+    throw new MoveError("invalid", `Unknown placement "${placement}"`);
+  }
+  if (placement === "on") {
+    if (patch.calloutOffset !== undefined) {
+      throw new MoveError("invalid", "callout_offset is only valid above or below the bar");
+    }
+    const line = patch.line ?? defaults.line;
+    if (!isLineIndex(line)) throw new MoveError("invalid", "line must be a whole number ≥ 0");
+    const count = lineCount(target);
+    if (line > count) {
+      throw new MoveError("invalid", `line ${line} is past the bar's last line + 1 (${count})`);
+    }
+    if (patch.newLine !== undefined && typeof patch.newLine !== "boolean") {
+      throw new MoveError("invalid", "new_line must be true or false");
+    }
+    if (patch.newLine) {
+      for (const e of target.entries) if (e.placement === "on" && e.line >= line) e.line++;
+    }
+    return { taskId, placement, line };
+  }
+  if (patch.line !== undefined || patch.newLine !== undefined) {
+    throw new MoveError("invalid", "callouts have no line; use callout_offset");
+  }
+  const offset = patch.calloutOffset ?? defaults.offset(placement);
+  const problem = offsetProblem(offset, placement);
+  if (problem) throw new MoveError("invalid", problem);
+  return { taskId, placement, calloutOffset: { x: offset.x, y: offset.y === 0 ? 0 : offset.y } };
 }
 
 /**
@@ -457,7 +531,7 @@ function markerToData(mk: Marker): MarkerData {
   };
 }
 
-function taskFromData(t: TaskData): Task {
+export function taskFromData(t: TaskData): Task {
   if (t.id === undefined || t.id === null) throw new Error("Every task needs an id");
   const start = parseDate(t.start_date);
   const isMilestone = isMilestoneDuration(t.duration);
@@ -476,7 +550,7 @@ function taskFromData(t: TaskData): Task {
   };
 }
 
-function taskToData(t: Task): TaskData {
+export function taskToData(t: Task): TaskData {
   return {
     id: t.id,
     text: t.text,

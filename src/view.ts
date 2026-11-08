@@ -1,9 +1,18 @@
 import { ApiError, RestClient } from "./api";
-import { attachDrag, type DropEvent, type MarkerDropEvent } from "./drag";
-import { patchFromData, TimelineModel } from "./model";
-import { render, unwatchLayout } from "./render";
+import { attachDrag, calloutOffset, hitTarget, targetElement, type DropEvent, type DropTarget, type MarkerDropEvent } from "./drag";
+import { patchFromData, taskFromData, taskToData, TimelineModel, timelineToData, type Task } from "./model";
+import { attachAt, render, unwatchLayout } from "./render";
 import { toSVG } from "./svg";
-import type { Id, MovePatchData, Offset, TimelineViewData } from "./types";
+import type {
+  EntryTargetData,
+  Id,
+  MovePatchData,
+  Offset,
+  TaskData,
+  TaskEntryData,
+  TimelineData,
+  TimelineViewData,
+} from "./types";
 
 export interface TimelineOptions {
   /** Base URL of the REST backend. Without it, changes are only reported through events. */
@@ -27,6 +36,19 @@ export interface MarkerMovedEvent {
   marker_offset: Offset;
 }
 
+export interface EntryAddedEvent {
+  timeline_id: Id;
+  task_id: Id;
+  /** The task, as the view now holds it. */
+  task: TaskData;
+  /** `true` when the task was new and `addEntry` added it to the view's tasks. */
+  new_task: boolean;
+  /** The new entry, in the data format. */
+  entry: TaskEntryData;
+  /** The timeline after the add, with all its entries: inserting a line renumbers the lines below it. */
+  timeline: TimelineData;
+}
+
 export interface TimelineEvents {
   /** A move was applied on screen. Fired before the REST request, if any, is sent. */
   entry_moved: EntryMovedEvent;
@@ -37,6 +59,12 @@ export interface TimelineEvents {
    * no REST call yet, so saving the new `marker_offset` is up to the host.
    */
   marker_moved: MarkerMovedEvent;
+  /**
+   * An entry was added with `addEntry` (for example a task dropped from a
+   * list outside the view). There is no REST call for it yet, so saving it is
+   * up to the host.
+   */
+  entry_added: EntryAddedEvent;
 }
 
 type Handler<T> = (event: T) => void;
@@ -105,6 +133,8 @@ export class TimelineView {
   private pending = 0;
   /** Bumped whenever local state is reset after a failure; queued requests from before are dropped. */
   private generation = 0;
+  /** The element `highlightTarget` marked, if any. */
+  private highlighted?: HTMLElement;
 
   constructor(container: string | HTMLElement, options: TimelineOptions = {}) {
     const node = typeof container === "string" ? document.getElementById(container) : container;
@@ -316,6 +346,91 @@ export class TimelineView {
     return request;
   }
 
+  /**
+   * Hit test for dragging something into the view from outside: the drop
+   * target at the point `x`, `y` (client coordinates, as in pointer events),
+   * or null when the point is outside the view. The target is a bar line, a
+   * half line above the first or below the last (`new_line: true`), or a
+   * callout area. Inside the view but on no area (a name label or the time
+   * scale) it is the vertically nearest callout area, as for drags inside the
+   * view.
+   *
+   * Pass `task` (an id, or a new task's data) to get a `callout_offset` for
+   * a callout area: the label's corner at the point, as when a bar is dragged
+   * there. Without it a callout target has no offset, and `addEntry` uses the
+   * default. Elements of the host page over the view, such as a drag ghost,
+   * are looked through.
+   */
+  targetAt(x: number, y: number, task?: Id | TaskData): EntryTargetData | null {
+    const model = this.requireModel();
+    const hit = hitTarget(this.container, x, y);
+    const timeline = hit && model.timelines.find((t) => String(t.id) === hit.target.timeline);
+    if (!hit || !timeline) return null;
+    const target = hit.target;
+    if (target.placement === "on") {
+      return { timeline_id: timeline.id, placement: "on", line: target.line, ...(target.newLine && { new_line: true }) };
+    }
+    const result: EntryTargetData = { timeline_id: timeline.id, placement: target.placement };
+    const found = task === undefined ? undefined : this.taskFor(task);
+    if (found) {
+      const point = { left: x, right: x, top: y, bottom: y, width: 0 };
+      result.callout_offset = calloutOffset(point, hit.node.getBoundingClientRect(), attachAt(timeline, found), target.placement);
+    }
+    return result;
+  }
+
+  /**
+   * Highlights a drop target (as `targetAt` returns it) the way the view
+   * highlights the target of its own drags; `null` removes the highlight.
+   * Only one target is highlighted at a time, and a re-render (such as after
+   * `addEntry`) removes it. Returns false if the target isn't in the view.
+   */
+  highlightTarget(target: EntryTargetData | null): boolean {
+    this.highlighted?.classList.remove("tlv-drop");
+    this.highlighted = undefined;
+    if (!target) return false;
+    const node = targetElement(this.container, this.dropTargetOf(target));
+    if (!node) return false;
+    node.classList.add("tlv-drop");
+    this.highlighted = node;
+    return true;
+  }
+
+  /**
+   * Adds a task to a timeline at `target` (as `targetAt` returns it), and
+   * fires `entry_added`. `task` is the id of a task the view already has, or
+   * a new task's data, which is added to the tasks. A task can be on a
+   * timeline only once. The target follows the move rules (see `moveEntry`);
+   * without `placement`, a `callout_offset` makes a callout and otherwise
+   * the entry goes on the bar, on `line` (default 0).
+   *
+   * Throws a `MoveError`, changing nothing, if the timeline or task id is
+   * unknown, the task is already on the timeline (or new task data reuses an
+   * id), or the target is invalid. Not sent to the REST API.
+   */
+  addEntry(task: Id | TaskData, target: EntryTargetData): void {
+    const model = this.requireModel();
+    const result = model.addEntry(task, {
+      timelineId: target.timeline_id,
+      ...(target.placement !== undefined && { placement: target.placement }),
+      ...(target.line !== undefined && { line: target.line }),
+      ...(target.new_line !== undefined && { newLine: target.new_line }),
+      ...(target.callout_offset !== undefined && { calloutOffset: target.callout_offset }),
+    });
+    this.highlighted = undefined;
+    this.render();
+    const timeline = timelineToData(result.timeline);
+    const entry = timeline.entries.find((e) => "task" in e && String(e.task) === String(result.task.id)) as TaskEntryData;
+    this.emit("entry_added", {
+      timeline_id: result.timeline.id,
+      task_id: result.task.id,
+      task: taskToData(result.task),
+      new_task: result.created,
+      entry,
+      timeline,
+    });
+  }
+
   /** Removes the view's DOM and event listeners. */
   destroy(): void {
     this.detachDrag();
@@ -324,6 +439,27 @@ export class TimelineView {
     this.handlers.clear();
     this.container.replaceChildren();
     this.container.classList.remove("tlv");
+  }
+
+  /** The task `targetAt` places a callout for: a known one by id, or new task data. */
+  private taskFor(task: Id | TaskData): Task | undefined {
+    const model = this.requireModel();
+    if (typeof task !== "object" || task === null) return model.findTask(task);
+    const known = model.findTask(task.id);
+    if (known) return known;
+    try {
+      return taskFromData(task);
+    } catch {
+      return undefined; // invalid data: no offset; addEntry reports the problem
+    }
+  }
+
+  /** A public target in the DOM's form, with the same defaults as `addEntry`. */
+  private dropTargetOf(target: EntryTargetData): DropTarget {
+    const timeline = String(target.timeline_id);
+    const placement = target.placement ?? (target.callout_offset ? (target.callout_offset.y > 0 ? "below" : "above") : "on");
+    if (placement !== "on") return { timeline, placement };
+    return { timeline, placement, line: target.line ?? 0, newLine: target.new_line === true };
   }
 
   private rollback(snapshot: TimelineViewData): void {

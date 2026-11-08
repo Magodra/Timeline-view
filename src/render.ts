@@ -63,6 +63,9 @@ function span(timeline: Timeline, task: Task) {
   return { from, to, center: (from + to) / 2, before, after };
 }
 
+/** A task's callout attachment point on `timeline`, as a fraction of the bar's width (as `data-at` holds it). */
+export const attachAt = (timeline: Timeline, task: Task): number => span(timeline, task).center;
+
 /**
  * Positions a bar-like element over a span. A task entirely outside the range
  * keeps a small stub at the nearest edge, marked `--outside-before` or

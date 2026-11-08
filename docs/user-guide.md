@@ -175,6 +175,28 @@ The number of bar lines comes from the entries: one more than the highest `line`
 
 Dragging doesn't change a task's dates.
 
+## Adding entries from outside the view
+
+To let users drag items from your own page (a backlog list, a search result) onto the view, handle the drag yourself and ask the view where the pointer is. [examples/add.html](../examples/add.html) is a complete page.
+
+- `timeline.targetAt(x, y, task)` returns the drop target at a point, in client coordinates (`e.clientX`, `e.clientY` of a pointer or drag event), or `null` outside the view. A target is `{ timeline_id, placement, line, new_line }` for a bar line (`new_line: true` on the strip above the first line or below the last), or `{ timeline_id, placement, callout_offset }` for the area above or below a bar. Inside the view but not on a bar line or label area (on a name or the time scale), it is the nearest label area, as for drags inside the view. Pass `task` (its id, or the data of a new task) to get a `callout_offset` that puts the label's corner at the point; without it the label gets the default position. Your drag ghost may cover the view: `targetAt` looks through elements that aren't part of the view.
+- `timeline.highlightTarget(target)` highlights that target the way the view's own drags do; `highlightTarget(null)` removes the highlight.
+- `timeline.addEntry(task, target)` adds the task there. `task` is the id of a task the view already has, or a new task's data (as in `tasks`), which is added to the view's tasks. It fires `entry_added`, and throws without changing anything if the timeline or task is unknown, the task is already on that timeline (a task can be on several timelines, once on each), new task data reuses an existing id, or the target is invalid.
+
+```js
+// In your pointermove handler:
+const target = timeline.targetAt(e.clientX, e.clientY, task);
+timeline.highlightTarget(target);
+
+// In your pointerup handler:
+timeline.highlightTarget(null);
+if (target) timeline.addEntry(task, target);
+```
+
+You can also build a target yourself: `addEntry(5, { timeline_id: 2 })` puts task 5 on line 0 of timeline 2's bar, and `{ timeline_id: 2, callout_offset: { x: 0, y: 20 } }` makes it a label below the bar. The same placement rules as for moves apply, and the bar is trimmed afterwards in the same way.
+
+`entry_added` gets `{ timeline_id, task_id, task, new_task, entry, timeline }`: the task's data, whether it was new, the new entry, and the whole timeline after the add (inserting a line renumbers the lines below it). There is no REST call for adding entries yet, so with a backend, saving the addition is up to you.
+
 ## Exporting as SVG
 
 `timeline.toSVG()` returns the view as an SVG document, exactly as it looks on screen now, including your theme. It is plain SVG (shapes and text), so it opens in browsers and in drawing tools. The view must be shown on the page when you call it.
@@ -267,6 +289,7 @@ timeline.attachEvent("onTimelineSelected", (ids) => {
 const off = timeline.on("entry_moved", (e) => { /* e.timeline_id, e.task_id, e.patch */ });
 timeline.on("move_failed", (e) => { /* e.error; the view already shows the restored state */ });
 timeline.on("marker_moved", (e) => { /* e.marker_id, e.marker_offset: a marker label was moved */ });
+timeline.on("entry_added", (e) => { /* e.timeline_id, e.task_id, e.task, e.new_task, e.entry, e.timeline */ });
 off(); // unsubscribe
 ```
 

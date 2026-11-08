@@ -1,5 +1,5 @@
 import "./styles.css";
-import type { Id, MovePatchData, Offset, TimelineViewData } from "./types";
+import type { EntryTargetData, Id, MovePatchData, Offset, TaskData, TimelineViewData } from "./types";
 import {
   TimelineView,
   type TimelineEventName,
@@ -16,6 +16,7 @@ export { parseDuration, addDuration } from "./duration";
 export {
   MoveCancelledError,
   TimelineView,
+  type EntryAddedEvent,
   type EntryMovedEvent,
   type MarkerMovedEvent,
   type MoveFailedEvent,
@@ -48,6 +49,9 @@ export const serialize = () => instance().serialize();
 export const toSVG = () => instance().toSVG();
 export const moveEntry = (timelineId: Id, taskId: Id, patch: MovePatchData) =>
   instance().moveEntry(timelineId, taskId, patch);
+export const addEntry = (task: Id | TaskData, target: EntryTargetData) => instance().addEntry(task, target);
+export const targetAt = (x: number, y: number, task?: Id | TaskData) => instance().targetAt(x, y, task);
+export const highlightTarget = (target: EntryTargetData | null) => instance().highlightTarget(target);
 export const attachEvent = <K extends TimelineEventName>(name: K, handler: TimelineHandlers[K]) =>
   instance().attachEvent(name, handler);
 export const detachEvent = (eventId: number) => instance().detachEvent(eventId);

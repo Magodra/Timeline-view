@@ -137,6 +137,22 @@ export interface MovePatchData {
   callout_offset?: Offset;
 }
 
+/**
+ * A spot in the view where an entry can go: what `targetAt()` returns, and
+ * what `addEntry()` and `highlightTarget()` take.
+ */
+export interface EntryTargetData {
+  timeline_id: Id;
+  /** The area. For `addEntry` it may be left out: a `callout_offset` then makes a callout, otherwise the entry goes on the bar. */
+  placement?: Placement;
+  /** Bar line, with placement `on`. */
+  line?: number;
+  /** With placement `on`: insert a new bar line at `line` (the half line above the first or below the last). */
+  new_line?: boolean;
+  /** Callout label position, with placement `above` or `below`. */
+  callout_offset?: Offset;
+}
+
 /** Response of a successful move. */
 export interface MoveResultData {
   version: number;

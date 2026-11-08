@@ -11,6 +11,7 @@ A timeline view for web planning applications. Framework-free TypeScript with no
 - Tasks drawn as bars and milestones as symbols, on the bar or as callouts above and below it.
 - Selection of tasks and timelines, with click and selection events.
 - Drag and drop between lines, areas and timelines.
+- Drag in tasks from your own page (`targetAt()`, `highlightTarget()`, `addEntry()`).
 - Export as SVG (`toSVG()`).
 - Optional REST backend for saving moves, with optimistic updates and rollback.
 

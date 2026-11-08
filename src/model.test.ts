@@ -270,3 +270,62 @@ describe("moveEntry", () => {
     }
   });
 });
+
+describe("addEntry", () => {
+  it("adds a known task by id, on the bar by default", () => {
+    const m = TimelineModel.fromData(sample());
+    const result = m.addEntry(3, { timelineId: 2 });
+    expect(result.created).toBe(false);
+    expect(result.timeline.id).toBe(2);
+    expect(entry(m, 2, 3)).toEqual({ task: 3, line: 0 });
+  });
+
+  it("adds new task data to the tasks", () => {
+    const m = TimelineModel.fromData(sample());
+    const result = m.addEntry({ id: 9, text: "New", start_date: "2026-04-20", duration: "3d" }, { timelineId: 1, line: 0 });
+    expect(result.created).toBe(true);
+    expect(m.toData().tasks.at(-1)).toEqual({ id: 9, text: "New", start_date: "2026-04-20", duration: "3d" });
+    expect(entry(m, 1, 9)).toEqual({ task: 9, line: 0 });
+  });
+
+  it("derives the area from callout_offset, and gives a callout without one the default offset", () => {
+    const m = TimelineModel.fromData(sample());
+    m.addEntry(3, { timelineId: 2, calloutOffset: { x: 5, y: 20 } });
+    expect(entry(m, 2, 3)).toEqual({ task: 3, callout_offset: { x: 5, y: 20 } });
+    m.addEntry(2, { timelineId: 2, placement: "above" });
+    expect(entry(m, 2, 2)).toEqual({ task: 2, callout_offset: { x: 0, y: -16 } });
+  });
+
+  it("inserts a new line and shifts the lines from there down", () => {
+    const m = TimelineModel.fromData(sample());
+    // Timeline 1: task 1 on line 1, trimmed to line 0 by the add.
+    m.addEntry({ id: 9, text: "New", start_date: "2026-04-20" }, { timelineId: 1, placement: "on", line: 1, newLine: true });
+    expect(entry(m, 1, 9)).toEqual({ task: 9, line: 0 });
+    expect(entry(m, 1, 1)).toEqual({ task: 1, line: 1 });
+  });
+
+  it("rejects bad adds without changing anything", () => {
+    const cases: [Parameters<TimelineModel["addEntry"]>, string][] = [
+      [[3, { timelineId: 99 }], "not_found"],
+      [[99, { timelineId: 1 }], "not_found"],
+      [[1, { timelineId: 1 }], "conflict"],
+      [[{ id: 1, text: "Dup", start_date: "2026-04-01" }, { timelineId: 2 }], "conflict"],
+      [[{ id: 9, text: "Bad", start_date: "nope" }, { timelineId: 2 }], "invalid"],
+      [[3, { timelineId: 2, line: 5 }], "invalid"],
+      [[3, { timelineId: 2, placement: "below", calloutOffset: { x: 0, y: -4 } }], "invalid"],
+      [[3, { timelineId: 2, placement: "above", line: 0 }], "invalid"],
+      [[3, { timelineId: 2, placement: "on", calloutOffset: { x: 0, y: 4 } }], "invalid"],
+    ];
+    for (const [args, code] of cases) {
+      const m = TimelineModel.fromData(sample());
+      const before = m.toData();
+      try {
+        m.addEntry(...args);
+        expect.unreachable(JSON.stringify(args));
+      } catch (error) {
+        expect((error as MoveError).code, JSON.stringify(args)).toBe(code);
+      }
+      expect(m.toData(), JSON.stringify(args)).toEqual(before);
+    }
+  });
+});

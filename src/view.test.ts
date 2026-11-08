@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskEntryData, TimelineViewData } from "./types";
 import { TimelineView, type MoveFailedEvent } from "./view";
 
@@ -639,5 +639,93 @@ describe("moveEntry with a REST backend", () => {
     await view.load("v1");
     expect((fetch.mock.calls[0] as unknown as [string])[0]).toBe("https://api.test/views/v1");
     expect(container.querySelectorAll(".tlv-timeline")).toHaveLength(1);
+  });
+});
+
+describe("adding entries from outside the view", () => {
+  const original = document.elementsFromPoint;
+  afterEach(() => {
+    document.elementsFromPoint = original;
+  });
+
+  const rect = (left: number, top: number, width: number, height: number) =>
+    ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+
+  /** Fake layout: the view at 0,0 1000×300, and `node` (with a host ghost on top) under every point. */
+  function layout(node: Element) {
+    container.getBoundingClientRect = () => rect(0, 0, 1000, 300);
+    const ghost = document.createElement("div");
+    document.body.append(ghost);
+    document.elementsFromPoint = () => [ghost, node];
+  }
+
+  it("returns null outside the view", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    layout(container.querySelector(".tlv-line")!);
+    expect(view.targetAt(1200, 50)).toBeNull();
+  });
+
+  it("finds a bar line or a half line, looking through the host's ghost", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    layout(container.querySelector('.tlv-line[data-line="1"]:not(.tlv-line--new)')!);
+    expect(view.targetAt(500, 100)).toEqual({ timeline_id: 1, placement: "on", line: 1 });
+
+    layout(container.querySelector(".tlv-line--new")!);
+    expect(view.targetAt(500, 100)).toEqual({ timeline_id: 1, placement: "on", line: 1, new_line: true });
+  });
+
+  it("gives a callout area an offset for the task, with the label's corner at the point", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const area = container.querySelector<HTMLElement>(".tlv-area--below")!;
+    area.getBoundingClientRect = () => rect(0, 200, 1000, 80);
+    layout(area);
+    expect(view.targetAt(600, 230)).toEqual({ timeline_id: 1, placement: "below" });
+    // Timeline 2026-03-01 to 2026-05-01 (61 days); milestone 2026-04-20 is day 50.
+    const target = view.targetAt(600, 230, { id: 9, text: "New", start_date: "2026-04-20" })!;
+    expect(target.callout_offset).toEqual({ x: Math.round(600 - (50 / 61) * 1000), y: 30 });
+  });
+
+  it("highlights one target at a time", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const marked = () => [...container.querySelectorAll<HTMLElement>(".tlv-drop")];
+    expect(view.highlightTarget({ timeline_id: 1, placement: "on", line: 1, new_line: true })).toBe(true);
+    expect(marked()).toHaveLength(1);
+    expect(marked()[0].classList.contains("tlv-line--new")).toBe(true);
+    expect(marked()[0].dataset.line).toBe("1");
+
+    view.highlightTarget({ timeline_id: 1, placement: "above" });
+    expect(marked().map((n) => n.dataset.placement)).toEqual(["above"]);
+    expect(view.highlightTarget({ timeline_id: 99, placement: "above" })).toBe(false);
+    expect(marked()).toHaveLength(0);
+  });
+
+  it("adds an entry, renders it and fires entry_added", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const events: unknown[] = [];
+    view.on("entry_added", (e) => events.push(e));
+    view.highlightTarget({ timeline_id: 1, placement: "above" });
+
+    view.addEntry({ id: 9, text: "New", start_date: "2026-04-20" }, { timeline_id: 1, placement: "above", callout_offset: { x: 4, y: -30 } });
+    expect(container.querySelector('.tlv-area--above .tlv-callout[data-task="9"]')).not.toBeNull();
+    expect(container.querySelectorAll(".tlv-drop")).toHaveLength(0);
+    expect(events).toEqual([
+      expect.objectContaining({
+        timeline_id: 1,
+        task_id: 9,
+        task: { id: 9, text: "New", start_date: "2026-04-20" },
+        new_task: true,
+        entry: { task: 9, callout_offset: { x: 4, y: -30 } },
+      }),
+    ]);
+    expect(view.serialize().tasks.map((t) => t.id)).toEqual([1, 2, 9]);
+
+    // The same task again on the same timeline is refused.
+    expect(() => view.addEntry(9, { timeline_id: 1 })).toThrow(/already on timeline/);
+    expect(events).toHaveLength(1);
   });
 });
