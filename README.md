@@ -14,7 +14,7 @@ A timeline view for web planning applications. Framework-free TypeScript with no
 - Export as SVG (`toSVG()`).
 - Optional REST backend for saving moves, with optimistic updates and rollback.
 
-**Documentation:** [getting started](https://github.com/Magodra/ar-timeline-view/raw/main/docs/getting-started.html) · [user guide](https://github.com/Magodra/ar-timeline-view/raw/main/docs/user-guide.html) · [developer guide](https://github.com/Magodra/ar-timeline-view/raw/main/docs/developer-guide.html) · [REST API](https://github.com/Magodra/ar-timeline-view/raw/main/docs/api/openapi.yaml)
+**Documentation:** [getting started](https://github.com/Magodra/ar-timeline-view/blob/main/docs/getting-started.html) · [user guide](https://github.com/Magodra/ar-timeline-view/blob/main/docs/user-guide.html) · [developer guide](https://github.com/Magodra/ar-timeline-view/blob/main/docs/developer-guide.html) · [REST API](https://github.com/Magodra/ar-timeline-view/blob/main/docs/api/openapi.yaml)
 
 ## Install
 
