@@ -14,11 +14,11 @@ if (!version) {
 
 const readme = fileURLToPath(new URL("../README.md", import.meta.url));
 const text = readFileSync(readme, "utf8");
-const updated = text.replace(/\/(blob|raw|tree)\/([^/]+)\//g, `/$1/v${version}/`);
+const updated = text.replace(/\/(blob|tags|tree)\/([^/]+)\//g, `/$1/v${version}/`);
 
 if (updated !== text) {
     writeFileSync(readme, updated);
-    console.log(`README.md: /blob/ and /raw/ links now point at ${version}`);
+    console.log(`README.md: /blob/, /tags/ and /tree/ links now point at ${version}`);
 } else {
-    console.log("README.md: no /blob/ or /raw/ links to change");
+    console.log("README.md: no /blob/, /tags/ or /tree/ links to change");
 }
