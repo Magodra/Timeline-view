@@ -414,7 +414,9 @@ const part = timeline.getTaskPosition("build", "dev", new Date("2026-04-01T00:00
 
 ## Styling with class templates
 
-`timeline.templates` holds functions that return extra CSS classes for the view's elements, so styling can depend on the data, including your own attributes on tasks and timelines:
+`timeline.templates` holds two kinds of functions. Class templates, listed in the first table below, return extra CSS classes for the view's elements, so styling can depend on the data, including your own attributes on tasks and timelines. [Content templates](#content-templates) replace an element's text with your own content.
+
+A class template looks like this:
 
 ```js
 timeline.templates.task_class = (start, end, task) => (task.priority === "high" ? "urgent" : "");
@@ -430,11 +432,6 @@ timeline.parse(data);
 
 | Template | Arguments | Element |
 |----------|-----------|---------|
-| `task_text` | `(start, end, task)` | Not a class: the HTML or node inside a task's bar. See [below](#adding-your-own-content-to-task-bars). |
-| `milestone_text` | `(start, end, task)` | Not a class: the content of a milestone's label. |
-| `callout_text` | `(start, end, task)` | Not a class: the content of a callout's label, in place of its name and dates. |
-| `marker_text` | `(start, end, marker)` | Not a class: the content of a marker's label, in place of its text and date. |
-| `tooltip_text` | `(start, end, item, kind)` | Not a class: the content of the tooltip. See [Tooltips](#tooltips). |
 | `tooltip_class` | `(start, end, item, kind)` | The tooltip, `.tlv-tooltip` |
 | `task_class` | `(start, end, task)` | A task's bar, `.tlv-task` |
 | `task_text_class` | `(start, end, task)` | The text in the bar, `.tlv-task-label` |
@@ -452,6 +449,20 @@ timeline.parse(data);
 `start` and `end` are `Date`s: the task's start and finish (the same for a milestone), the timeline's range, the period's limits, or the marker's date (twice). `task`, `timeline` and `marker` are in the data format. Scale periods are UTC, so use `getUTCDay()` and the like on them. Return one class or several separated by spaces, or `""` for none. A template that throws is logged and adds nothing. Change a color through the theme's custom properties (such as `--tlv-task`), as above, and it also applies to the drag ghost and `toSVG()`.
 
 Templates run on every draw. Set them before `parse()`, or call `timeline.render()` afterwards. `timeline.templates` belongs to the default instance and can be filled in before `init`; a `new TimelineView` has its own `view.templates`. In React, pass a `templates` prop, and keep the object stable (outside the component, or with `useMemo`), since a new object redraws the view.
+
+### Content templates
+
+These return an element's content rather than a class:
+
+| Template | Arguments | Content of |
+|----------|-----------|------------|
+| `task_text` | `(start, end, task, entry)` | A task's bar, `.tlv-task-label`. See [below](#adding-your-own-content-to-task-bars). |
+| `milestone_text` | `(start, end, task, entry)` | A milestone's label, `.tlv-milestone-label` |
+| `callout_text` | `(start, end, task, entry)` | A callout's label, in place of its name and dates |
+| `marker_text` | `(start, end, marker)` | A marker's label, in place of its text and date |
+| `tooltip_text` | `(start, end, item, kind)` | The tooltip, `.tlv-tooltip`. See [Tooltips](#tooltips). |
+
+Each returns an HTML string or a DOM node. `entry` is the task's entry on the timeline being drawn, in the data format.
 
 ### Adding your own content to task bars
 

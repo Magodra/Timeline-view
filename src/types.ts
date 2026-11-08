@@ -178,8 +178,9 @@ export type TaskClassTemplate = (start: Date, end: Date, task: TaskData) => stri
 export type TimelineClassTemplate = (start: Date, end: Date, timeline: TimelineData) => string;
 
 /**
- * Functions returning extra CSS classes (one or several, space separated; ""
- * for none) for the view's elements: `timeline.templates` or `view.templates`.
+ * Functions for the view's elements: `timeline.templates` or `view.templates`.
+ * The `*_class` ones return extra CSS classes (one or several, space separated;
+ * "" for none), and the `*_text` ones an element's content.
  * They run on every draw; set them before `parse()`, or call `render()` after.
  */
 export interface TimelineTemplates {

@@ -3,6 +3,12 @@
 All notable changes to `ar-timeline-view`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
+## Unreleased
+
+### Changed
+
+- **User guide.** The content templates (`task_text`, `milestone_text`, `callout_text`, `marker_text`, `tooltip_text`) have their own table, with the `entry` argument they receive.
+
 ## 1.3.0
 
 ### Added
