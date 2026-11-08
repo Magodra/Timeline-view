@@ -743,3 +743,67 @@ describe("adding entries from outside the view", () => {
     expect(events).toHaveLength(1);
   });
 });
+
+describe("removing tasks and timelines", () => {
+  /** Task 1 on both timelines; task 2 only on timeline 1. */
+  const two = (): TimelineViewData => {
+    const data = sample();
+    data.timelines.push({ id: 2, name: "Two", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [{ task: 1, line: 2 }] });
+    return data;
+  };
+
+  it("removes a task from the tasks and every timeline, and fires task_removed", () => {
+    const view = new TimelineView("tl");
+    view.parse(two());
+    view.selectTask(1);
+    const selected: unknown[] = [];
+    view.attachEvent("onTaskSelected", (ids) => selected.push(ids));
+    const events: unknown[] = [];
+    view.on("task_removed", (e) => events.push(e));
+
+    view.removeTask(1);
+    expect(container.querySelector('[data-task="1"]')).toBeNull();
+    const data = view.serialize();
+    expect(data.tasks.map((t) => t.id)).toEqual([2]);
+    expect(data.timelines.map((t) => t.entries)).toEqual([[{ task: 2, callout_offset: { x: 30, y: 16 } }], []]);
+    expect(view.getSelectedTasks()).toEqual([]);
+    expect(selected).toEqual([[]]);
+    expect(events).toEqual([
+      {
+        task_id: 1,
+        task: { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d" },
+        timelines: data.timelines,
+      },
+    ]);
+  });
+
+  it("removes a timeline but keeps its tasks, and fires timeline_removed", () => {
+    const view = new TimelineView("tl");
+    view.parse(two());
+    view.selectTimeline(1);
+    const events: unknown[] = [];
+    view.on("timeline_removed", (e) => events.push(e));
+
+    view.removeTimeline(1);
+    expect([...container.querySelectorAll<HTMLElement>(".tlv-timeline")].map((n) => n.dataset.timeline)).toEqual(["2"]);
+    expect(view.serialize().tasks.map((t) => t.id)).toEqual([1, 2]);
+    expect(view.getSelectedTimelines()).toEqual([]);
+    expect(events).toEqual([{ timeline_id: 1, timeline: sample().timelines[0], index: 0, order: [2] }]);
+
+    // The last one too: the view is then empty.
+    view.removeTimeline(2);
+    expect(container.querySelectorAll(".tlv-timeline")).toHaveLength(0);
+    expect(events.at(-1)).toMatchObject({ timeline_id: 2, index: 0, order: [] });
+  });
+
+  it("throws for an unknown id, without an event", () => {
+    const view = new TimelineView("tl");
+    view.parse(two());
+    const handler = vi.fn();
+    view.on("task_removed", handler);
+    view.on("timeline_removed", handler);
+    expect(() => view.removeTask(9)).toThrow(/not found/);
+    expect(() => view.removeTimeline(9)).toThrow(/not found/);
+    expect(handler).not.toHaveBeenCalled();
+  });
+});

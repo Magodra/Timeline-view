@@ -20,7 +20,9 @@ export {
   type EntryMovedEvent,
   type MarkerMovedEvent,
   type MoveFailedEvent,
+  type TaskRemovedEvent,
   type TimelineMovedEvent,
+  type TimelineRemovedEvent,
   type TimelineEvents,
   type TimelineEventName,
   type TimelineHandlers,
@@ -67,5 +69,7 @@ export const setMarkerOffset = (markerId: Id, offset: Offset) => instance().setM
 export const moveTimelineUp = (id: Id) => instance().moveTimelineUp(id);
 export const moveTimelineDown = (id: Id) => instance().moveTimelineDown(id);
 export const moveTimeline = (id: Id, delta: number) => instance().moveTimeline(id, delta);
+export const removeTask = (id: Id) => instance().removeTask(id);
+export const removeTimeline = (id: Id) => instance().removeTimeline(id);
 export const on = <K extends keyof TimelineEvents>(name: K, handler: (event: TimelineEvents[K]) => void) =>
   instance().on(name, handler);

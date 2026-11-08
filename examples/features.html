@@ -18,11 +18,13 @@
         own time axis, so it is drawn on each timeline separately.
         Click a task or a timeline to select it, Ctrl+Click (Cmd+Click on a Mac) to select several,
         and click a selected item again to deselect. The buttons below are outside the component
-        and move the selected timelines with <code>moveTimelineUp</code> / <code>moveTimelineDown</code>.
+        and move the selected timelines with <code>moveTimelineUp</code> / <code>moveTimelineDown</code>,
+        or remove the selected tasks or timelines with <code>removeTask</code> / <code>removeTimeline</code>.
     </p>
     <p class="controls">
         <button type="button" id="move_up" disabled>Move up</button>
         <button type="button" id="move_down" disabled>Move down</button>
+        <button type="button" id="remove" disabled>Remove</button>
         <span id="selection">Nothing selected.</span>
     </p>
     <div id="timeline_here"></div>
@@ -88,6 +90,7 @@
             moveDown.disabled = at.length === 0 || at[at.length - 1] === count - 1;
             const tasks = timeline.getSelectedTasks();
             const timelines = timeline.getSelectedTimelines();
+            remove.disabled = tasks.length === 0 && timelines.length === 0;
             document.getElementById("selection").textContent =
                 tasks.length ? `Selected tasks: ${tasks.join(", ")}`
                 : timelines.length ? `Selected timelines: ${timelines.join(", ")}`
@@ -107,6 +110,14 @@
         };
         moveUp.addEventListener("click", () => moveSelected(true));
         moveDown.addEventListener("click", () => moveSelected(false));
+        // Removing deselects the removed items, which updates the buttons.
+        const remove = document.getElementById("remove");
+        remove.addEventListener("click", () => {
+            for (const id of timeline.getSelectedTasks()) timeline.removeTask(id);
+            for (const id of timeline.getSelectedTimelines()) timeline.removeTimeline(id);
+        });
+        timeline.on("task_removed", (e) => console.log("task_removed", e));
+        timeline.on("timeline_removed", (e) => console.log("timeline_removed", e));
     </script>
     <script>
         // A second view on the same page needs its own TimelineView.

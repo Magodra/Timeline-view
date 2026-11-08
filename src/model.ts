@@ -378,6 +378,36 @@ export class TimelineModel {
     return true;
   }
 
+  /**
+   * Removes a task and its entries on every timeline, then trims those
+   * timelines' lines. Returns the task and the timelines it was on.
+   */
+  removeTask(id: Id): { task: Task; timelines: Timeline[] } {
+    const index = this.tasks.findIndex((t) => sameId(t.id, id));
+    if (index < 0) throw new MoveError("not_found", `Task ${id} not found`);
+    const [task] = this.tasks.splice(index, 1);
+    const timelines: Timeline[] = [];
+    for (const timeline of this.timelines) {
+      const kept = timeline.entries.filter((e) => !sameId(e.taskId, task.id));
+      if (kept.length === timeline.entries.length) continue;
+      timeline.entries = kept;
+      trimLines(timeline);
+      timelines.push(timeline);
+    }
+    return { task, timelines };
+  }
+
+  /**
+   * Removes a timeline with its entries. Its tasks stay, also those on no
+   * other timeline. Returns the timeline and the position it had (0-based).
+   */
+  removeTimeline(id: Id): { timeline: Timeline; index: number } {
+    const index = this.timelines.findIndex((t) => sameId(t.id, id));
+    if (index < 0) throw new MoveError("not_found", `Timeline ${id} not found`);
+    const [timeline] = this.timelines.splice(index, 1);
+    return { timeline, index };
+  }
+
   /** Replaces whole timelines, as returned by a successful REST move. */
   replaceTimelines(data: TimelineData[]): void {
     for (const t of data) {

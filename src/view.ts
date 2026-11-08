@@ -59,6 +59,24 @@ export interface TimelineMovedEvent {
   order: Id[];
 }
 
+export interface TaskRemovedEvent {
+  task_id: Id;
+  /** The removed task's data. */
+  task: TaskData;
+  /** The timelines the task was on, after the removal, with all their entries (lines may be renumbered). */
+  timelines: TimelineData[];
+}
+
+export interface TimelineRemovedEvent {
+  timeline_id: Id;
+  /** The removed timeline's data, with its entries. */
+  timeline: TimelineData;
+  /** Its 0-based position in the stack before the removal. */
+  index: number;
+  /** The remaining timelines' ids, top to bottom. */
+  order: Id[];
+}
+
 export interface TimelineEvents {
   /** A move was applied on screen. Fired before the REST request, if any, is sent. */
   entry_moved: EntryMovedEvent;
@@ -81,6 +99,10 @@ export interface TimelineEvents {
    * it is up to the host.
    */
   timeline_moved: TimelineMovedEvent;
+  /** A task was removed with `removeTask`. No REST call yet: saving it is up to the host. */
+  task_removed: TaskRemovedEvent;
+  /** A timeline was removed with `removeTimeline`. No REST call yet: saving it is up to the host. */
+  timeline_removed: TimelineRemovedEvent;
 }
 
 type Handler<T> = (event: T) => void;
@@ -280,6 +302,42 @@ export class TimelineView {
     const marker = this.requireModel().setMarkerOffset(markerId, offset);
     this.render();
     this.emit("marker_moved", { marker_id: marker.id, marker_offset: { ...marker.offset } });
+  }
+
+  /**
+   * Removes a task: from the tasks and from every timeline it is on (their
+   * bar lines are trimmed as after a move). Deselects it, and fires
+   * `task_removed`. Throws a `MoveError` (`not_found`) for an unknown id.
+   * Not sent to the REST API.
+   */
+  removeTask(id: Id): void {
+    const { task, timelines } = this.requireModel().removeTask(id);
+    this.render();
+    this.dropStaleSelection();
+    this.emit("task_removed", {
+      task_id: task.id,
+      task: taskToData(task),
+      timelines: timelines.map(timelineToData),
+    });
+  }
+
+  /**
+   * Removes a timeline and its entries. Its tasks stay in the data, also
+   * those that are on no other timeline now. Deselects it, and fires
+   * `timeline_removed`. Throws a `MoveError` (`not_found`) for an unknown id.
+   * Not sent to the REST API.
+   */
+  removeTimeline(id: Id): void {
+    const model = this.requireModel();
+    const { timeline, index } = model.removeTimeline(id);
+    this.render();
+    this.dropStaleSelection();
+    this.emit("timeline_removed", {
+      timeline_id: timeline.id,
+      timeline: timelineToData(timeline),
+      index,
+      order: model.timelines.map((t) => t.id),
+    });
   }
 
   /** Moves a timeline one place up the stack. Returns false if it is already at the top. */

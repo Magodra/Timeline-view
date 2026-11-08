@@ -267,6 +267,26 @@ timeline.getSelectedTimelines();        // ["dev"], or []
 
 Set `selection: false` in the view to turn selection off: clicks still fire `onTaskClick` and `onTimelineClick`, but nothing is selected or highlighted, and `selectTask`/`selectTimeline` return `false`. The highlight colors are `--tlv-selected`, `--tlv-selected-bg` and `--tlv-selected-text`. SVG exports leave the selection out.
 
+## Removing tasks and timelines
+
+`timeline.removeTask(id)` removes a task: from the tasks, and from every timeline it is on. The bar lines of those timelines are tidied up as after a move. `timeline.removeTimeline(id)` removes a timeline with its entries; its tasks stay in the data, even those that are now on no timeline. Both deselect what they remove, and throw for an unknown id.
+
+They fire `task_removed` and `timeline_removed`:
+
+| Event | Gets |
+|-------|------|
+| `task_removed` | `{ task_id, task, timelines }`: the removed task's data, and the timelines it was on, as they are now. |
+| `timeline_removed` | `{ timeline_id, timeline, index, order }`: the removed timeline's data, its 0-based position before, and the remaining timelines' ids from top to bottom. |
+
+The REST API has no calls for these yet, so with a backend, saving the removal is up to you. The component has no remove buttons; [examples/features.html](../examples/features.html) adds one for the selection:
+
+```js
+document.getElementById("remove").addEventListener("click", () => {
+  for (const id of timeline.getSelectedTasks()) timeline.removeTask(id);
+  for (const id of timeline.getSelectedTimelines()) timeline.removeTimeline(id);
+});
+```
+
 ## Reordering timelines
 
 `moveTimelineUp(id)` and `moveTimelineDown(id)` move a timeline one place in the stack; `moveTimeline(id, delta)` moves it any number of places (negative is up). They return `false` when the timeline is already at the top or bottom. Each move fires `timeline_moved` with `{ timeline_id, from_index, to_index, order }`: the 0-based positions before and after, and every timeline's id from top to bottom. The new order is also in `serialize()`. With a REST backend, saving the order is up to the host for now (for example in `timeline_moved`): the API has no call for it.
@@ -291,6 +311,8 @@ timeline.on("move_failed", (e) => { /* e.error; the view already shows the resto
 timeline.on("marker_moved", (e) => { /* e.marker_id, e.marker_offset: a marker label was moved */ });
 timeline.on("entry_added", (e) => { /* e.timeline_id, e.task_id, e.task, e.new_task, e.entry, e.timeline */ });
 timeline.on("timeline_moved", (e) => { /* e.timeline_id, e.from_index, e.to_index, e.order */ });
+timeline.on("task_removed", (e) => { /* e.task_id, e.task, e.timelines */ });
+timeline.on("timeline_removed", (e) => { /* e.timeline_id, e.timeline, e.index, e.order */ });
 off(); // unsubscribe
 ```
 
