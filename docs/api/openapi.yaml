@@ -180,7 +180,10 @@ paths:
         opens one. Afterwards the source and target timelines are trimmed:
         if the first used bar line isn't 0, every bar entry moves up so it is.
         The number of bar lines is never stored: it is the highest `line` used
-        plus one (at least 1). Gaps between used lines stay.
+        plus one (at least 1). Gaps between used lines stay, unless the view
+        has `compact_lines: true`: then the affected timelines' used lines are
+        renumbered 0, 1, 2, ... in order, closing every empty line. The same
+        applies after adding or removing an entry, and removing a task.
       requestBody:
         required: true
         content:
@@ -612,6 +615,14 @@ components:
           type: boolean
           default: true
           description: Show each timeline's start and finish dates, with "Start" and "Finish" captions, beside its bar.
+        compact_lines:
+          type: boolean
+          default: false
+          description: |
+            Close up bar lines that a change leaves empty: after a move, an
+            entry add or removal, or a task removal, the affected timelines'
+            used lines are renumbered 0, 1, 2, ... in order. Otherwise empty
+            lines between used ones stay as gaps.
         selection:
           type: boolean
           default: true

@@ -37,6 +37,7 @@ An entry can't have both `line` and `callout_offset`. One task can appear on sev
     name_position: "left",            // left | right (default left)
     milestone_symbol: "diamond",      // diamond | circle | square | triangle | star
     show_dates: true,                 // show Start and Finish dates beside each bar (default true)
+    compact_lines: false,             // close up bar lines a move leaves empty (default false)
     selection: true                   // clicks select and highlight tasks and timelines (default true)
   },
   tasks: [
@@ -278,7 +279,7 @@ Drag a task bar, milestone or label with the mouse, pen or a finger:
 - Drop a label beyond the edge of its area, or even outside the view, and it goes to the nearest label area, which grows to include it.
 - Press Escape to cancel.
 
-The number of bar lines comes from the entries: one more than the highest `line` used, and at least one. After every move, blank lines at the top and bottom of the bar are removed, and the lines close up so the first one is line 0. A blank line between used lines stays as a gap. Inserting a line moves the lines below it down by one.
+The number of bar lines comes from the entries: one more than the highest `line` used, and at least one. After every move, blank lines at the top and bottom of the bar are removed, and the lines close up so the first one is line 0. A blank line between used lines stays as a gap, unless the view has `compact_lines: true`: then a line that a move leaves empty closes up, and the lines below it move up, so the bar never has gaps. That also applies when a task is taken off a timeline or removed. Inserting a line moves the lines below it down by one. With a REST backend, the server must follow the same setting (the view's `compact_lines` is in the data it stores).
 
 Dragging doesn't change a task's dates.
 

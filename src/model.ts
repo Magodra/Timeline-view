@@ -30,6 +30,8 @@ export interface View {
   namePosition: NamePosition;
   milestoneSymbol: MilestoneSymbol;
   showDates: boolean;
+  /** Close up bar lines that a change leaves empty (`compact_lines`). */
+  compactLines: boolean;
   /** Whether clicks select tasks and timelines. */
   selection: boolean;
 }
@@ -171,6 +173,9 @@ export class TimelineModel {
     if (v.show_dates !== undefined && typeof v.show_dates !== "boolean") {
       throw new Error("view.show_dates must be true or false");
     }
+    if (v.compact_lines !== undefined && typeof v.compact_lines !== "boolean") {
+      throw new Error("view.compact_lines must be true or false");
+    }
     if (v.absolute !== undefined && typeof v.absolute !== "boolean") {
       throw new Error("view.absolute must be true or false");
     }
@@ -189,6 +194,7 @@ export class TimelineModel {
       namePosition: v.name_position ?? "left",
       milestoneSymbol: v.milestone_symbol ?? "diamond",
       showDates: v.show_dates ?? true,
+      compactLines: v.compact_lines ?? false,
       selection: v.selection ?? true,
     };
 
@@ -224,6 +230,7 @@ export class TimelineModel {
         name_position: v.namePosition,
         milestone_symbol: v.milestoneSymbol,
         show_dates: v.showDates,
+        compact_lines: v.compactLines,
         selection: v.selection,
       },
       tasks: this.tasks.map(taskToData),
@@ -426,8 +433,8 @@ export class TimelineModel {
       source.entries.splice(index, 1);
       target.entries.push(moved);
     }
-    trimLines(source);
-    if (target !== source) trimLines(target);
+    trimLines(source, this.view.compactLines);
+    if (target !== source) trimLines(target, this.view.compactLines);
     return target === source ? [source] : [source, target];
   }
 
@@ -467,7 +474,7 @@ export class TimelineModel {
     const entry = placeEntry(timeline, found.id, placement, target, { line: 0, offset: defaultOffset });
     if (created) this.tasks.push(found);
     timeline.entries.push(entry);
-    trimLines(timeline);
+    trimLines(timeline, this.view.compactLines);
     return { task: found, created, timeline };
   }
 
@@ -504,7 +511,7 @@ export class TimelineModel {
     } catch (error) {
       throw new MoveError("invalid", error instanceof Error ? error.message : String(error));
     }
-    trimLines(timeline);
+    trimLines(timeline, this.view.compactLines);
     this.timelines.splice(position, 0, timeline);
     return { timeline, position };
   }
@@ -582,7 +589,7 @@ export class TimelineModel {
     const index = timeline.entries.findIndex((e) => sameId(e.taskId, taskId));
     if (index < 0) throw new MoveError("not_found", `Task ${taskId} is not on timeline ${timelineId}`);
     const [entry] = timeline.entries.splice(index, 1);
-    trimLines(timeline);
+    trimLines(timeline, this.view.compactLines);
     return { entry, timeline };
   }
 
@@ -642,7 +649,7 @@ export class TimelineModel {
       const kept = timeline.entries.filter((e) => !sameId(e.taskId, task.id));
       if (kept.length === timeline.entries.length) continue;
       timeline.entries = kept;
-      trimLines(timeline);
+      trimLines(timeline, this.view.compactLines);
       timelines.push(timeline);
     }
     return { task, timelines };
@@ -751,9 +758,18 @@ export function firstLine(timeline: Timeline): number {
 /**
  * Removes blank bar lines above the first used one by renumbering the
  * entries so the first used line is 0. Blank lines below the last used one
- * need no trimming: `lineCount` doesn't count them. Gaps between used lines stay.
+ * need no trimming: `lineCount` doesn't count them. Gaps between used lines
+ * stay, unless `compact` (the view's `compact_lines`): then every empty line
+ * closes up, and the lines below it move up.
  */
-export function trimLines(timeline: Timeline): void {
+export function trimLines(timeline: Timeline, compact = false): void {
+  if (compact) {
+    // Every used line keeps its order, numbered 0, 1, 2, ...: empty lines close up.
+    const used = [...new Set(timeline.entries.flatMap((e) => (e.placement === "on" ? [e.line] : [])))].sort((a, b) => a - b);
+    const to = new Map(used.map((line, index) => [line, index]));
+    for (const e of timeline.entries) if (e.placement === "on") e.line = to.get(e.line)!;
+    return;
+  }
   const first = firstLine(timeline);
   if (first === 0) return;
   for (const e of timeline.entries) if (e.placement === "on") e.line -= first;

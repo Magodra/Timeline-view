@@ -42,6 +42,12 @@ export interface ViewData {
   /** Show each timeline's start and finish dates, with "Start" and "Finish" captions, beside its bar. Default: `true`. */
   show_dates?: boolean;
   /**
+   * Close up empty bar lines: when a change (a move, or removing an entry or
+   * task) leaves a line empty, the lines below it move up. Default: `false`,
+   * where empty lines between used ones stay as gaps.
+   */
+  compact_lines?: boolean;
+  /**
    * Clicking a task or timeline selects and highlights it, and fires
    * `onTaskSelected` / `onTimelineSelected`. Default: `true`.
    */

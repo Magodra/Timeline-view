@@ -34,6 +34,7 @@
         <span id="selection">Nothing selected.</span>
         <button type="submit" id="add_timeline_button" disabled>Add timeline</button>
         <input type="text" id="new_timeline_name" placeholder="Name" aria-label="New timeline name" required>
+        <label><input type="checkbox" id="compact_lines"> Compact empty lines</label>
     </form>
     <div id="timeline_here"></div>
 
@@ -105,6 +106,12 @@
                 : "Nothing selected.";
         };
         timeline.attachEvent("onTimelineSelected", updateControls);
+        // view.compact_lines: a bar line that a move leaves empty closes up. Re-parse with the option changed.
+        document.getElementById("compact_lines").addEventListener("change", (e) => {
+            const data = timeline.serialize();
+            data.view.compact_lines = e.target.checked;
+            timeline.parse(data);
+        });
         timeline.attachEvent("onTaskSelected", updateControls);
         // Move the top one first when going up, the bottom one first when going down.
         const moveSelected = (up) => {

@@ -615,3 +615,81 @@ describe("updateTimeline", () => {
     }
   });
 });
+
+describe("compact_lines", () => {
+  /** Timeline 1: task 1 on line 0, task 3 on line 1, task 2 on line 2. Timeline 2 is empty. */
+  const lines = (compact?: boolean) => {
+    const data = sample();
+    if (compact !== undefined) data.view.compact_lines = compact;
+    data.timelines[0].entries = [
+      { task: 1, line: 0 },
+      { task: 3, line: 1 },
+      { task: 2, line: 2 },
+    ];
+    data.timelines[1].entries = [];
+    return TimelineModel.fromData(data);
+  };
+  const lineOf = (m: TimelineModel, timeline: number) =>
+    Object.fromEntries(entries(m, timeline).map((e) => [e.task, e.line]));
+
+  it("is off by default: a line a task leaves stays as a gap", () => {
+    const m = lines();
+    expect(m.view.compactLines).toBe(false);
+    m.moveEntry(1, 3, { line: 0 });
+    expect(lineOf(m, 1)).toEqual({ 1: 0, 3: 0, 2: 2 });
+  });
+
+  it("closes up a line a task leaves, moving the lines below up", () => {
+    const m = lines(true);
+    m.moveEntry(1, 3, { line: 0 });
+    expect(lineOf(m, 1)).toEqual({ 1: 0, 3: 0, 2: 1 });
+    expect(lineCount(m.findTimeline(1)!)).toBe(2);
+  });
+
+  it("closes up after moving to another timeline, removing an entry or a task, and moving to a callout", () => {
+    const toOther = lines(true);
+    toOther.moveEntry(1, 3, { timelineId: 2 });
+    expect(lineOf(toOther, 1)).toEqual({ 1: 0, 2: 1 });
+
+    const removed = lines(true);
+    removed.removeEntry(1, 3);
+    expect(lineOf(removed, 1)).toEqual({ 1: 0, 2: 1 });
+
+    const deleted = lines(true);
+    deleted.removeTask(3);
+    expect(lineOf(deleted, 1)).toEqual({ 1: 0, 2: 1 });
+
+    const callout = lines(true);
+    callout.moveEntry(1, 3, { placement: "above" });
+    expect(lineOf(callout, 1)).toEqual({ 1: 0, 2: 1, 3: undefined });
+  });
+
+  it("keeps a newly inserted line, and the order of the others", () => {
+    const m = lines(true);
+    // Task 2 to a new line at the top: lines shift down, then line 2 (where it was) is empty and closes.
+    m.moveEntry(1, 2, { line: 0, newLine: true });
+    expect(lineOf(m, 1)).toEqual({ 2: 0, 1: 1, 3: 2 });
+  });
+
+  it("closes gaps from loaded data on a timeline once something on it changes", () => {
+    const data = sample();
+    data.view.compact_lines = true;
+    data.timelines[0].entries = [
+      { task: 1, line: 0 },
+      { task: 3, line: 4 },
+      { task: 2, callout_offset: { x: 0, y: 16 } },
+    ];
+    const m = TimelineModel.fromData(data);
+    expect(lineOf(m, 1)).toEqual({ 1: 0, 3: 4, 2: undefined }); // loaded as is
+    m.moveEntry(1, 2, { placement: "below", calloutOffset: { x: 5, y: 20 } });
+    expect(lineOf(m, 1)).toEqual({ 1: 0, 3: 1, 2: undefined });
+  });
+
+  it("is part of the data format, and must be true or false", () => {
+    expect(lines(true).toData().view.compact_lines).toBe(true);
+    expect(lines().toData().view.compact_lines).toBe(false);
+    const bad = sample();
+    (bad.view as { compact_lines?: unknown }).compact_lines = "yes";
+    expect(() => TimelineModel.fromData(bad)).toThrow(/compact_lines must be true or false/);
+  });
+});
