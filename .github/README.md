@@ -15,8 +15,10 @@ A timeline view for use in web planning applications. Framework-free TypeScript 
 
 ```sh
 npm install
-npm run dev     # examples at /examples/index.html
-npm run build   # dist/timelineview.js, .mjs, .css, and the example images in docs/images
+npm run dev       # examples at /examples/index.html
+npm run build     # dist/timelineview.js, .mjs, .css, and the example images in docs/images
+npm version x.y.z # update npm version number, add version tag to github, update version numbers in README.md.
+npm publish       # to publish ar_timeline_view to npmjs.com
 ```
 
 A minimal timeline, from [examples/basic.html](../examples/basic.html):
