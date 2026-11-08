@@ -20,6 +20,7 @@ export {
   type EntryMovedEvent,
   type MarkerMovedEvent,
   type MoveFailedEvent,
+  type TimelineMovedEvent,
   type TimelineEvents,
   type TimelineEventName,
   type TimelineHandlers,

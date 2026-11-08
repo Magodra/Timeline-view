@@ -332,6 +332,20 @@ describe("moving timelines", () => {
     expect(container.querySelector(".tlv-timeline--selected")!.getAttribute("data-timeline")).toBe("2");
   });
 
+  it("fires timeline_moved for each move, but not when nothing moves", () => {
+    const view = new TimelineView("tl");
+    view.parse(three());
+    const events: unknown[] = [];
+    view.on("timeline_moved", (e) => events.push(e));
+    view.moveTimelineUp(2);
+    view.moveTimelineUp(2); // already at the top
+    view.moveTimeline(2, 2);
+    expect(events).toEqual([
+      { timeline_id: 2, from_index: 1, to_index: 0, order: [2, 1, 3] },
+      { timeline_id: 2, from_index: 0, to_index: 2, order: [1, 3, 2] },
+    ]);
+  });
+
   it("throws for an unknown timeline", () => {
     const view = new TimelineView("tl");
     view.parse(three());

@@ -181,7 +181,7 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
 | `timeline.serialize()` | Returns the current data. |
 | `timeline.toSVG()` | Returns the view as a standalone SVG document (a string), as it looks on screen. The view must be rendered and visible. Saving it is up to the host page; see [examples/export.html](examples/export.html). |
 | `timeline.moveEntry(timeline_id, task_id, patch)` | Moves an entry, as a drop does. Takes the PATCH body below, without `version`. |
-| `timeline.on("entry_moved" \| "move_failed" \| "marker_moved" \| "entry_added", handler)` | Subscribes to move events. Returns an unsubscribe function. `marker_moved` gets `{ marker_id, marker_offset }`; `entry_added` gets `{ timeline_id, task_id, task, new_task, entry, timeline }` (`timeline`: its full data after the add). |
+| `timeline.on("entry_moved" \| "move_failed" \| "marker_moved" \| "entry_added" \| "timeline_moved", handler)` | Subscribes to move events. Returns an unsubscribe function. `marker_moved` gets `{ marker_id, marker_offset }`; `entry_added` gets `{ timeline_id, task_id, task, new_task, entry, timeline }` (`timeline`: its full data after the add); `timeline_moved` gets `{ timeline_id, from_index, to_index, order }` (0-based positions; `order`: all timeline ids, top to bottom). |
 | `timeline.targetAt(x, y, task?)` | Hit test in client coordinates: the drop target `{ timeline_id, placement, line?, new_line?, callout_offset? }` at the point, or `null` outside the view. `task` (id or new task data) gives callout targets an offset. |
 | `timeline.highlightTarget(target \| null)` | Highlights a drop target as internal drags do, or removes the highlight. Returns `false` if the target isn't in the view. |
 | `timeline.addEntry(task, target)` | Adds a task (an existing id, or new task data, which is added to `tasks`) at a target, following the move rules; without `placement`, a `callout_offset` makes a callout, otherwise the bar (`line` default 0). Fires `entry_added`. Throws a `MoveError` (`not_found`, `conflict`, `invalid`) without changing anything. Not sent to the REST API (**TBD**). |
@@ -190,7 +190,7 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
 | `timeline.selectTask(id, add?)`, `selectTimeline(id, add?)` | Selects only this item, or with `add` adds it to the selection (same kind only). Return `false` when `view.selection` is off. |
 | `timeline.unselectTask(id)`, `unselectTimeline(id)`, `clearSelection()` | Deselects one item, or everything. |
 | `timeline.getSelectedTasks()`, `getSelectedTimelines()` | The selected ids, in the order they were selected; `[]` when the other kind (or nothing) is selected. |
-| `timeline.moveTimelineUp(id)`, `moveTimelineDown(id)`, `moveTimeline(id, delta)` | Reorders the timelines. Return `false` at the top or bottom. Not sent to the REST API. |
+| `timeline.moveTimelineUp(id)`, `moveTimelineDown(id)`, `moveTimeline(id, delta)` | Reorders the timelines and fires `timeline_moved`. Return `false` at the top or bottom, without the event. Not sent to the REST API. |
 | `timeline.detachEvent(event_id)` | Removes a handler added with `attachEvent`. Returns `false` for an unknown id. |
 | `new timeline.TimelineView(container, options)` | Separate instance, for more than one view on a page. Same methods. |
 

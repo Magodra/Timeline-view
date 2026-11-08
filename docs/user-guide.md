@@ -269,7 +269,7 @@ Set `selection: false` in the view to turn selection off: clicks still fire `onT
 
 ## Reordering timelines
 
-`moveTimelineUp(id)` and `moveTimelineDown(id)` move a timeline one place in the stack; `moveTimeline(id, delta)` moves it any number of places (negative is up). They return `false` when the timeline is already at the top or bottom. The new order is in `serialize()`. With a REST backend, saving the order is up to the host for now: the API has no call for it.
+`moveTimelineUp(id)` and `moveTimelineDown(id)` move a timeline one place in the stack; `moveTimeline(id, delta)` moves it any number of places (negative is up). They return `false` when the timeline is already at the top or bottom. Each move fires `timeline_moved` with `{ timeline_id, from_index, to_index, order }`: the 0-based positions before and after, and every timeline's id from top to bottom. The new order is also in `serialize()`. With a REST backend, saving the order is up to the host for now (for example in `timeline_moved`): the API has no call for it.
 
 The component has no buttons for this; add your own, for example for the selected timeline (as in [examples/features.html](../examples/features.html), which also moves several selected timelines together):
 
@@ -290,6 +290,7 @@ const off = timeline.on("entry_moved", (e) => { /* e.timeline_id, e.task_id, e.p
 timeline.on("move_failed", (e) => { /* e.error; the view already shows the restored state */ });
 timeline.on("marker_moved", (e) => { /* e.marker_id, e.marker_offset: a marker label was moved */ });
 timeline.on("entry_added", (e) => { /* e.timeline_id, e.task_id, e.task, e.new_task, e.entry, e.timeline */ });
+timeline.on("timeline_moved", (e) => { /* e.timeline_id, e.from_index, e.to_index, e.order */ });
 off(); // unsubscribe
 ```
 

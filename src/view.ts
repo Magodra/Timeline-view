@@ -49,6 +49,16 @@ export interface EntryAddedEvent {
   timeline: TimelineData;
 }
 
+export interface TimelineMovedEvent {
+  timeline_id: Id;
+  /** 0-based position in the stack before the move. */
+  from_index: number;
+  /** 0-based position in the stack after the move. */
+  to_index: number;
+  /** Every timeline's id, top to bottom, after the move. */
+  order: Id[];
+}
+
 export interface TimelineEvents {
   /** A move was applied on screen. Fired before the REST request, if any, is sent. */
   entry_moved: EntryMovedEvent;
@@ -65,6 +75,12 @@ export interface TimelineEvents {
    * up to the host.
    */
   entry_added: EntryAddedEvent;
+  /**
+   * A timeline was moved in the stack (`moveTimeline`, `moveTimelineUp`,
+   * `moveTimelineDown`). There is no REST call for the order yet, so saving
+   * it is up to the host.
+   */
+  timeline_moved: TimelineMovedEvent;
 }
 
 type Handler<T> = (event: T) => void;
@@ -282,9 +298,20 @@ export class TimelineView {
    * `serialize()`; the REST API has no call for it yet.
    */
   moveTimeline(id: Id, delta: number): boolean {
-    const moved = this.requireModel().moveTimeline(id, delta);
-    if (moved) this.render();
-    return moved;
+    const model = this.requireModel();
+    const index = (timelineId: Id) => model.timelines.findIndex((t) => String(t.id) === String(timelineId));
+    const from = index(id);
+    const moved = model.moveTimeline(id, delta);
+    if (!moved) return false;
+    this.render();
+    const timeline = model.timelines[from + delta];
+    this.emit("timeline_moved", {
+      timeline_id: timeline.id,
+      from_index: from,
+      to_index: from + delta,
+      order: model.timelines.map((t) => t.id),
+    });
+    return true;
   }
 
   /**
