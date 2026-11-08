@@ -49,6 +49,8 @@ export interface Task {
   symbol?: MilestoneSymbol;
   /** CSS color overriding the theme's task or milestone color. */
   color?: string;
+  /** The host's own attributes from the data (anything else on the task), kept as they are. */
+  custom: Record<string, unknown>;
 }
 
 export interface Marker {
@@ -131,7 +133,7 @@ function asInvalid<T>(check: () => T): T {
     throw new MoveError("invalid", error instanceof Error ? error.message : String(error));
   }
 }
-const TASK_PATCH_FIELDS: readonly (keyof TaskPatchData)[] = ["text", "start_date", "duration", "finish_date", "symbol", "color"];
+const TASK_FIELDS = new Set(["id", "text", "start_date", "duration", "finish_date", "symbol", "color"]);
 
 const sameId = (a: Id, b: Id) => String(a) === String(b);
 const isLineIndex = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 0;
@@ -596,7 +598,8 @@ export class TimelineModel {
   /**
    * Changes a task: the fields in `patch` (data format) replace the task's,
    * and `null` clears an optional one (`duration`, `finish_date`, `symbol`,
-   * `color`). The finish is given one way: setting `duration` drops
+   * `color`, or a custom attribute). Fields the view doesn't know are the
+   * host's custom attributes, set like any other; only `id` can't change. The finish is given one way: setting `duration` drops
    * `finish_date` and the other way round, and clearing both makes a
    * milestone. The result is validated as `parse()` would. Throws a
    * `MoveError` (`not_found`, `invalid`) without changing anything. Returns
@@ -608,8 +611,7 @@ export class TimelineModel {
     if (patch === null || typeof patch !== "object" || Array.isArray(patch)) {
       throw new MoveError("invalid", "A task patch must be an object");
     }
-    const unknown = Object.keys(patch).filter((k) => !TASK_PATCH_FIELDS.includes(k as keyof TaskPatchData));
-    if (unknown.length) throw new MoveError("invalid", `Unknown task fields: ${unknown.join(", ")}`);
+    if ("id" in patch) throw new MoveError("invalid", "A task's id can't be changed");
     if (patch.text !== undefined && typeof patch.text !== "string") throw new MoveError("invalid", "text must be a string");
     if (patch.start_date === null) throw new MoveError("invalid", "start_date can't be cleared");
 
@@ -857,11 +859,13 @@ export function taskFromData(t: TaskData): Task {
     isMilestone: finish.getTime() === start.getTime(),
     symbol: t.symbol,
     color: t.color,
+    custom: Object.fromEntries(Object.entries(t).filter(([key]) => !TASK_FIELDS.has(key))),
   };
 }
 
 export function taskToData(t: Task): TaskData {
   return {
+    ...t.custom,
     id: t.id,
     text: t.text,
     start_date: dateToData(t.start),

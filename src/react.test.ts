@@ -124,6 +124,13 @@ describe("Timeline (React)", () => {
     expect(host.querySelector(".tlv-date-value")!.textContent).toBe("2026-03-01");
   });
 
+  it("applies templates, and redraws when they change", () => {
+    show({ data: sample(), templates: { task_class: () => "one" } });
+    expect(host.querySelector(".tlv-task")!.classList.contains("one")).toBe(true);
+    show({ data: sample(), templates: { task_class: () => "two" } });
+    expect(host.querySelector(".tlv-task")!.classList.contains("two")).toBe(true);
+  });
+
   it("reports invalid data to onError", () => {
     const onError = vi.fn();
     const bad = sample();

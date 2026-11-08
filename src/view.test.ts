@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DateFormatter, TaskEntryData, TimelineData, TimelineViewData } from "./types";
+import { escapeHtml } from "./index";
+import type { DateFormatter, TaskData, TaskEntryData, TimelineData, TimelineViewData } from "./types";
 import { defaultFormatDate, defaultFormatTick, TimelineView, type MoveFailedEvent } from "./view";
 
 function sample(): TimelineViewData {
@@ -1665,5 +1666,297 @@ describe("built-in controls", () => {
     expect(svg).not.toContain("×");
     expect(svg).not.toContain("+ Timeline");
     expect(container.querySelector(".tlv-menu")).not.toBeNull(); // back after the export
+  });
+});
+
+describe("getTaskPosition", () => {
+  /** Timeline 1 runs 2026-03-01 to 2026-05-01 (61 days): 610 px wide makes a day 10 px. */
+  function setUp() {
+    const data = sample();
+    data.timelines.push({ id: 2, name: "Two", start_date: "2026-04-01", finish_date: "2026-04-11", entries: [{ task: 1, line: 0 }] });
+    const view = new TimelineView("tl");
+    view.parse(data);
+    for (const line of container.querySelectorAll<HTMLElement>(".tlv-line")) {
+      const width = line.dataset.timeline === "1" ? 610 : 100;
+      line.getBoundingClientRect = () => ({ left: 0, top: 0, right: width, bottom: 28, width, height: 28, x: 0, y: 0, toJSON: () => ({}) });
+    }
+    return view;
+  }
+  const utc = (text: string) => new Date(`${text}T00:00:00Z`);
+
+  it("gives a task's own span, by task or id, on a timeline given by id or data", () => {
+    const view = setUp();
+    const expected = { left: 310, right: 280, top: 0, height: 28, width: 20 }; // day 31, 2 days long
+    expect(view.getTaskPosition(1, 1)).toEqual(expected);
+    expect(view.getTaskPosition(view.serialize().tasks[0], view.serialize().timelines[0])).toEqual(expected);
+  });
+
+  it("takes other dates, a timeline, and holds dates at the bar's edges", () => {
+    const view = setUp();
+    expect(view.getTaskPosition(1, 1, utc("2026-03-02"), utc("2026-03-04"))).toEqual({ left: 10, right: 580, top: 0, height: 28, width: 20 });
+    expect(view.getTaskPosition(1, 2)).toEqual({ left: 0, right: 80, top: 0, height: 28, width: 20 });
+    expect(view.getTaskPosition(1, 1, utc("2026-01-01"), utc("2027-01-01"))).toEqual({ left: 0, right: 0, top: 0, height: 28, width: 610 });
+  });
+
+  it("gives a milestone no width, and null when there is nothing to measure", () => {
+    const view = setUp();
+    expect(view.getTaskPosition(2, 1)!.left).toBeCloseTo(400);
+    expect(view.getTaskPosition(2, 1)!.width).toBe(0);
+    expect(view.getTaskPosition(99, 1)).toBeNull();
+    expect(view.getTaskPosition(1, 99)).toBeNull();
+    expect(view.getTaskPosition(2, 2)).toBeNull(); // not on timeline 2
+    const hidden = new TimelineView(document.body.appendChild(document.createElement("div")));
+    hidden.parse(sample());
+    expect(hidden.getTaskPosition(1, 1)).toBeNull(); // jsdom: no layout, as when hidden
+  });
+});
+
+describe("task layers", () => {
+  const rect = (top: number, width: number, height: number) =>
+    ({ left: 0, top, right: width, bottom: top + height, width, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  const planned = (): TimelineViewData => {
+    const data = sample();
+    data.tasks[0] = { ...data.tasks[0], planned_start: "2026-03-02", planned_end: "2026-03-04", owner: { team: "A" } };
+    return data;
+  };
+  /** Pretends the view is shown. */
+  const shown = (): TimelineView => {
+    container.getClientRects = () => [rect(0, 1000, 300)] as unknown as DOMRectList;
+    const view = new TimelineView("tl");
+    view.parse(planned());
+    return view;
+  };
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("calls a layer for each task on a bar line, and puts its element under the tasks", () => {
+    const view = shown();
+    const layer = vi.fn((task: TaskData) => {
+      const el = document.createElement("div");
+      el.className = "baseline";
+      el.dataset.planned = String(task.planned_start);
+      return el;
+    });
+    const id = view.addTaskLayer(layer);
+
+    // Task 1 is on the bar; milestone 2 is a callout, so it has no layer.
+    expect(layer).toHaveBeenCalledOnce();
+    const [task, timeline] = layer.mock.calls[0] as unknown as [TaskData, TimelineData];
+    expect([task.id, task.owner, timeline.id, timeline.name]).toEqual([1, { team: "A" }, 1, "Project"]);
+    expect(layer.mock.contexts[0]).toBe(view); // `this` in a function
+    const track = container.querySelector(".tlv-track")!;
+    expect(track.firstElementChild!.className).toBe("tlv-layers");
+    expect(track.querySelector<HTMLElement>(".baseline.tlv-layer")!.dataset.planned).toBe("2026-03-02");
+
+    expect(view.removeTaskLayer(id)).toBe(true);
+    expect(container.querySelector(".tlv-layers")).toBeNull();
+    expect(view.removeTaskLayer(id)).toBe(false);
+  });
+
+  it("draws again after a change and on resize, and skips false and a layer that throws", () => {
+    const view = shown();
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const good = vi.fn(() => document.createElement("div"));
+    view.addTaskLayer(() => false);
+    view.addTaskLayer(() => {
+      throw new Error("broken");
+    });
+    view.addTaskLayer(good);
+    expect(container.querySelectorAll(".tlv-layer")).toHaveLength(1);
+    expect(error).toHaveBeenCalled();
+
+    view.renameView("Changed").catch(() => undefined);
+    expect(good).toHaveBeenCalledTimes(2);
+    view.resize();
+    expect(good).toHaveBeenCalledTimes(3);
+    expect(container.querySelectorAll(".tlv-layer")).toHaveLength(1); // replaced, not piled up
+  });
+
+  it("isn't called while the view is hidden", () => {
+    const view = new TimelineView("tl");
+    view.parse(planned()); // jsdom has no layout, as when hidden
+    const layer = vi.fn(() => document.createElement("div"));
+    view.addTaskLayer(layer);
+    expect(layer).not.toHaveBeenCalled();
+  });
+
+  it("can place an element with getTaskPosition from date strings in the task's own attributes", () => {
+    const view = shown();
+    // Timeline 1 is 61 days: 610 px wide makes a day 10 px. Bar lines start 14 px into the area (the half line).
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("tlv-line") ? rect(114, 610, 28) : rect(100, 610, 70);
+    });
+    const task = view.serialize().tasks[0];
+    expect(view.getTaskPosition(task, 1, task.planned_start as string, task.planned_end as string)).toEqual({
+      left: 10,
+      right: 580,
+      top: 14,
+      height: 28,
+      width: 20,
+    });
+  });
+});
+
+describe("updateTask with custom attributes", () => {
+  it("changes them, redraws layers, fires task_updated, and sends them to the backend", async () => {
+    const fetch = vi.fn(async () => json(200, { version: 8, task: { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d", planned_start: "2026-03-09" } }));
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(sample());
+    const updated = vi.fn();
+    view.on("task_updated", updated);
+
+    await expect(view.updateTask(1, { planned_start: "2026-03-09" })).resolves.toBe(true);
+    expect(view.serialize().tasks[0].planned_start).toBe("2026-03-09");
+    expect(updated.mock.calls[0][0]).toMatchObject({ task: { planned_start: "2026-03-09" } });
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect([init.method, url, JSON.parse(init.body as string)]).toEqual([
+      "PATCH",
+      "https://api.test/views/v1/tasks/1",
+      { planned_start: "2026-03-09", version: 7 },
+    ]);
+    await expect(view.updateTask(1, { planned_start: "2026-03-09" })).resolves.toBe(false); // unchanged
+    await expect(view.updateTask(1, { id: 5 })).rejects.toThrow(/id can't be changed/);
+  });
+});
+
+describe("class templates", () => {
+  const data = (): TimelineViewData => {
+    const d = sample();
+    d.view.scale = "month";
+    d.tasks[0] = { ...d.tasks[0], priority: "high" };
+    d.tasks.push({ id: 3, text: "On the bar", start_date: "2026-04-20" }, { id: 4, text: "Called out", start_date: "2026-04-05", duration: "2d" });
+    d.timelines[0].entries.push({ task: 3, line: 0 }, { task: 4, callout_offset: { x: 0, y: -30 } }, { marker: "m" });
+    d.markers = [{ id: "m", text: "Kick-off", date: "2026-03-10" }];
+    return d;
+  };
+  const has = (selector: string, cls: string) => container.querySelector(selector)!.classList.contains(cls);
+
+  it("adds the classes each template gives to its element", () => {
+    const view = new TimelineView("tl");
+    const names = [
+      "task_class", "task_text_class", "milestone_class", "milestone_text_class", "callout_class", "callout_marker_class",
+      "timeline_class", "timeline_bar_class", "timeline_name_class", "scale_cell_class", "marker_class",
+    ] as const;
+    for (const name of names) view.templates[name] = () => `x-${name} second`;
+    view.templates.bar_line_class = (_start, _end, _timeline, line) => `line-${line}`;
+    view.parse(data());
+
+    expect(has('.tlv-task[data-task="1"]', "x-task_class")).toBe(true);
+    expect(has('.tlv-task[data-task="1"]', "second")).toBe(true); // several classes
+    expect(has(".tlv-task-label", "x-task_text_class")).toBe(true);
+    expect(has(".tlv-milestone", "x-milestone_class")).toBe(true);
+    expect(has(".tlv-milestone-label", "x-milestone_text_class")).toBe(true);
+    expect(has(".tlv-callout", "x-callout_class")).toBe(true);
+    expect(has(".tlv-edge-bar", "x-callout_marker_class")).toBe(true);
+    expect(has(".tlv-timeline", "x-timeline_class")).toBe(true);
+    expect(has(".tlv-bar", "x-timeline_bar_class")).toBe(true);
+    expect(has(".tlv-name", "x-timeline_name_class")).toBe(true);
+    expect(has(".tlv-period", "x-scale_cell_class")).toBe(true);
+    expect(has(".tlv-marker-line", "x-marker_class")).toBe(true);
+    expect(has(".tlv-marker-label", "x-marker_class")).toBe(true);
+    expect(has('.tlv-line[data-line="1"]:not(.tlv-line--new)', "line-1")).toBe(true);
+    expect(container.querySelector(".tlv-line--new")!.className).toBe("tlv-line tlv-line--new");
+  });
+
+  it("passes the dates and the data, with custom attributes", () => {
+    const view = new TimelineView("tl");
+    const task = vi.fn((_start: Date, _end: Date, _task: TaskData) => "");
+    const cell = vi.fn((_start: Date, _end: Date, _timeline: TimelineData) => "");
+    view.templates.task_class = task;
+    view.templates.scale_cell_class = cell;
+    view.parse(data());
+    const call = task.mock.calls.find((c) => c[2].id === 1)!;
+    expect([call[0].toISOString(), call[1].toISOString(), call[2].priority]).toEqual([
+      "2026-04-01T00:00:00.000Z", "2026-04-03T00:00:00.000Z", "high",
+    ]);
+    const months = cell.mock.calls.map((c) => [c[0].toISOString().slice(0, 10), c[1].toISOString().slice(0, 10), c[2].id]);
+    expect(months).toEqual([["2026-03-01", "2026-04-01", 1], ["2026-04-01", "2026-05-01", 1]]);
+  });
+
+  it("applies after render(), keeps working after changes, and survives a template that throws", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const view = new TimelineView("tl");
+    expect(() => view.render()).not.toThrow(); // nothing loaded yet
+    view.parse(data());
+    view.templates.task_class = (_s, _e, task) => (task.priority === "high" ? "urgent" : "");
+    expect(has('.tlv-task[data-task="1"]', "urgent")).toBe(false);
+    view.render();
+    expect(has('.tlv-task[data-task="1"]', "urgent")).toBe(true);
+    await view.renameView("Changed");
+    expect(has('.tlv-task[data-task="1"]', "urgent")).toBe(true);
+
+    view.templates.task_class = () => {
+      throw new Error("broken");
+    };
+    view.render();
+    expect(container.querySelector('.tlv-task[data-task="1"]')).not.toBeNull();
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+});
+
+describe("task_text template", () => {
+  const label = () => container.querySelector<HTMLElement>('.tlv-task[data-task="1"] .tlv-task-label')!;
+
+  it("puts HTML in the task's bar", () => {
+    const view = new TimelineView("tl");
+    view.templates.task_text = (_start, _end, task) => `${String(task.text)} <button class="go">Text</button>`;
+    view.parse(sample());
+    expect(label().querySelector("button.go")!.textContent).toBe("Text");
+    expect(label().textContent).toBe("Task #1 Text");
+  });
+
+  it("takes a DOM node, so it can have its own listeners", () => {
+    const view = new TimelineView("tl");
+    const clicked = vi.fn();
+    view.templates.task_text = () => {
+      const button = document.createElement("button");
+      button.addEventListener("click", clicked);
+      return button;
+    };
+    view.parse(sample());
+    label().querySelector("button")!.click();
+    expect(clicked).toHaveBeenCalledOnce();
+  });
+
+  it("lets a button in the bar be pressed without dragging, clicking or selecting the task", () => {
+    const view = new TimelineView("tl");
+    view.templates.task_text = () => "<button>Go</button>";
+    view.parse(sample());
+    const Pointer = (globalThis.PointerEvent ?? MouseEvent) as typeof MouseEvent;
+    const clicked = vi.fn();
+    const started = vi.fn();
+    view.attachEvent("onTaskClick", clicked);
+    view.on("dragging_started", started);
+    const button = label().querySelector("button")!;
+    button.dispatchEvent(new Pointer("pointerdown", { bubbles: true, button: 0, clientX: 10 }));
+    window.dispatchEvent(new Pointer("pointermove", { bubbles: true, button: 0, clientX: 80 }));
+    window.dispatchEvent(new Pointer("pointerup", { bubbles: true, button: 0, clientX: 80 }));
+    expect(clicked).not.toHaveBeenCalled();
+    expect(started).not.toHaveBeenCalled();
+    expect(view.getSelectedTasks()).toEqual([]);
+  });
+
+  it("falls back to the task's text when the template fails", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const view = new TimelineView("tl");
+    view.templates.task_text = () => {
+      throw new Error("broken");
+    };
+    view.parse(sample());
+    expect(label().textContent).toBe("Task #1");
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("exports the plain text in SVG, and escapeHtml makes text safe", () => {
+    const view = new TimelineView("tl");
+    view.templates.task_text = () => "<button>Only on screen</button>";
+    view.parse(sample());
+    const svg = view.toSVG();
+    expect(svg).toContain("Task #1");
+    expect(svg).not.toContain("Only on screen");
+    expect(escapeHtml(`<b a="1">&'`)).toBe("&#60;b a=&#34;1&#34;&#62;&#38;&#39;");
   });
 });

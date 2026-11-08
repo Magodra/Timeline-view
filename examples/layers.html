@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Timeline view - task layers</title>
+    <script src="../dist/timelineview.js"></script>
+    <link href="../dist/timelineview.css" rel="stylesheet">
+    <link href="examples.css" rel="stylesheet">
+    <style>
+        .baseline { background: rgba(191, 135, 0, 0.35); border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>Task layers</h1>
+    <p>
+        <code>addTaskLayer</code> draws your own elements under the task bars. Here each task has its own
+        <code>planned_start</code> and <code>planned_end</code> attributes in the data, and the layer draws the
+        planned period as an amber band behind the actual bar. Drag a task to another line, or resize the window:
+        the layer is drawn again.
+    </p>
+    <p class="controls"><label><input type="checkbox" id="show" checked> Show the planned periods</label></p>
+    <div id="timeline_here"></div>
+    <script>
+        timeline.init("timeline_here");
+        timeline.parse({
+            view: { name: "Planned and actual", scale: "week" },
+            tasks: [
+                { id: 1, text: "Design", start_date: "2026-03-09", duration: "3w", planned_start: "2026-03-02", planned_end: "2026-03-23" },
+                { id: 2, text: "Build", start_date: "2026-03-30", duration: "4w", planned_start: "2026-03-23", planned_end: "2026-04-13" },
+                { id: 3, text: "Test", start_date: "2026-04-27", duration: "2w" }
+            ],
+            timelines: [
+                { id: 1, name: "Team", start_date: "2026-03-01", finish_date: "2026-05-17", entries: [
+                    { task: 1, line: 0 }, { task: 2, line: 1 }, { task: 3, line: 2 }
+                ]}
+            ]
+        });
+
+        // `this` is the view; the `timeline` parameter is the timeline being drawn.
+        function draw_planned(task, timeline) {
+            if (task.planned_start && task.planned_end) {
+                const sizes = this.getTaskPosition(task, timeline, task.planned_start, task.planned_end);
+                const el = document.createElement("div");
+                el.className = "baseline";
+                el.style.left = sizes.left + "px";
+                el.style.top = sizes.top + "px";
+                el.style.width = sizes.width + "px";
+                el.style.height = sizes.height + "px";
+                return el;
+            }
+            return false;
+        }
+
+        let layer = timeline.addTaskLayer(draw_planned);
+        document.getElementById("show").addEventListener("change", (e) => {
+            if (e.target.checked) layer = timeline.addTaskLayer(draw_planned);
+            else timeline.removeTaskLayer(layer);
+        });
+    </script>
+</body>
+</html>

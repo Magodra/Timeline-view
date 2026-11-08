@@ -62,6 +62,8 @@ export interface ViewData {
  * times without one are read as UTC.
  */
 export interface TaskData {
+  /** Any other attributes are the host's own: kept with the task, returned by `serialize()`, and passed to task layers. */
+  [custom: string]: unknown;
   id: Id;
   text: string;
   start_date: string;
@@ -139,6 +141,63 @@ export interface TimelineViewData {
   timelines: TimelineData[];
   /** Date markers. Optional. */
   markers?: MarkerData[];
+}
+
+/** Where a date span sits on a timeline's bar: what `getTaskPosition` returns. CSS pixels, relative to the bar's task area. */
+export interface TaskPosition {
+  /** CSS `left`: from the area's left edge to the start of the span. */
+  left: number;
+  /** CSS `right`: from the end of the span to the area's right edge. */
+  right: number;
+  /** CSS `top`: from the area's top edge to the task's line (the first line for a callout). */
+  top: number;
+  /** CSS `height` of a bar line. */
+  height: number;
+  /** From the first date to the second; 0 for a milestone. */
+  width: number;
+}
+
+/** A class template for something showing a task: its start and finish, and the task's data with any custom attributes. */
+export type TaskClassTemplate = (start: Date, end: Date, task: TaskData) => string;
+/** A class template for part of a timeline: the timeline's range and its data. */
+export type TimelineClassTemplate = (start: Date, end: Date, timeline: TimelineData) => string;
+
+/**
+ * Functions returning extra CSS classes (one or several, space separated; ""
+ * for none) for the view's elements: `timeline.templates` or `view.templates`.
+ * They run on every draw; set them before `parse()`, or call `render()` after.
+ */
+export interface TimelineTemplates {
+  /**
+   * The content of a task's bar (`.tlv-task-label`): an HTML string, or a DOM
+   * node. Default: the task's text. A string is inserted as HTML, so escape
+   * anything that isn't trusted (`escapeHtml`).
+   */
+  task_text?: (start: Date, end: Date, task: TaskData) => string | Node;
+  /** A task's bar on a bar line (`.tlv-task`). */
+  task_class?: TaskClassTemplate;
+  /** The text in a task's bar (`.tlv-task-label`). */
+  task_text_class?: TaskClassTemplate;
+  /** A milestone on a bar line (`.tlv-milestone`). `start` and `end` are the same date. */
+  milestone_class?: TaskClassTemplate;
+  /** A milestone's text (`.tlv-milestone-label`). */
+  milestone_text_class?: TaskClassTemplate;
+  /** A callout's label (`.tlv-callout`). */
+  callout_class?: TaskClassTemplate;
+  /** A callout's marker on the bar's edge (`.tlv-edge-bar` or `.tlv-edge-symbol`). */
+  callout_marker_class?: TaskClassTemplate;
+  /** A timeline's row (`.tlv-timeline`). */
+  timeline_class?: TimelineClassTemplate;
+  /** A timeline's bar (`.tlv-bar`). */
+  timeline_bar_class?: TimelineClassTemplate;
+  /** A timeline's name label (`.tlv-name`). */
+  timeline_name_class?: TimelineClassTemplate;
+  /** One bar line (`.tlv-line`); `line` is its 0-based index. Not the half lines for inserting. */
+  bar_line_class?: (start: Date, end: Date, timeline: TimelineData, line: number) => string;
+  /** One period of the time scale (`.tlv-period`), such as a day; `start` and `end` are its limits within the timeline, in UTC. */
+  scale_cell_class?: TimelineClassTemplate;
+  /** A marker's line and label (`.tlv-marker-line`, `.tlv-marker-label`). `start` and `end` are its date. */
+  marker_class?: (start: Date, end: Date, marker: MarkerData) => string;
 }
 
 /** Which date a `format_date` call is for. */
@@ -222,6 +281,8 @@ export interface AddEntryData extends AddEntryPlaceData {
  * makes the task a milestone.
  */
 export interface TaskPatchData {
+  /** The host's custom attributes: set to the value given, or removed with `null`. */
+  [custom: string]: unknown;
   text?: string;
   start_date?: string;
   duration?: string | null;

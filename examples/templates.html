@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Timeline view - class templates</title>
+    <script src="../dist/timelineview.js"></script>
+    <link href="../dist/timelineview.css" rel="stylesheet">
+    <link href="examples.css" rel="stylesheet">
+    <style>
+        /* task_class: colors from the task's own "priority" attribute. */
+        .tlv-task.high { --tlv-task: #cf222e; }
+        .tlv-task.low { --tlv-task: #6e7781; }
+        /* task_text_class */
+        .tlv-task-label.done { text-decoration: line-through; }
+        /* A custom element in the bar, from CSS alone: a progress band and a badge. */
+        .tlv-task.has-progress::before {
+            content: ""; position: absolute; inset: 0 auto 0 0; width: var(--progress);
+            background: rgba(255, 255, 255, 0.3); border-radius: 3px 0 0 3px; pointer-events: none;
+        }
+        .tlv-task.flagged::after { content: "⚑"; position: absolute; right: 5px; top: 1px; color: white; pointer-events: none; }
+        /* timeline_bar_class, bar_line_class, scale_cell_class, milestone_class, marker_class */
+        .tlv-bar.frozen { outline: 2px solid #8250df; }
+        .tlv-line.even-line { background: rgba(127, 127, 127, 0.08); }
+        .tlv-period.weekend { background: rgba(207, 34, 46, 0.14); }
+        .tlv-milestone.key .tlv-milestone-label { font-weight: 700; }
+        .tlv-marker-label.today { font-style: italic; }
+        /* task_text: a button inside the bar. */
+        .bar-button { font: inherit; font-size: 11px; line-height: 14px; padding: 0 5px; margin-left: 4px; cursor: pointer; }
+        /* A real element, from a task layer raised above the bar. */
+        .avatar {
+            z-index: 1; display: grid; place-items: center; border-radius: 50%; background: #1a7f37;
+            color: white; font-size: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Class templates</h1>
+    <p>
+        <code>timeline.templates</code> holds functions that return extra CSS classes. Here they colour tasks by a
+        <code>priority</code> attribute in the data, strike out finished ones, shade weekends and every other bar line,
+        and outline a frozen timeline. The lighter band and the flag inside the bars are drawn by CSS
+        (<code>::before</code> and <code>::after</code>) on those classes. The round initials are real elements, added
+        with a task layer.
+    </p>
+    <p>The <code>task_text</code> template puts a real button in the "Payment API" bar: <span id="clicked">not clicked yet.</span></p>
+    <div id="timeline_here"></div>
+    <script>
+        timeline.templates.task_class = (start, end, task) => {
+            const classes = [task.priority ?? ""];
+            if (task.progress !== undefined) classes.push("has-progress");
+            if (task.flagged) classes.push("flagged");
+            return classes.join(" ");
+        };
+        // task_text: your own HTML in the bar. A button in a bar is clickable and doesn't start a drag.
+        timeline.templates.task_text = (start, end, task) =>
+            task.priority === "high"
+                ? `${timeline.escapeHtml(task.text)} <button class="bar-button" data-task="${task.id}">Details</button>`
+                : timeline.escapeHtml(task.text);
+        timeline.templates.task_text_class = (start, end, task) => (task.progress === 100 ? "done" : "");
+        timeline.templates.milestone_class = (start, end, task) => (task.key ? "key" : "");
+        timeline.templates.timeline_bar_class = (start, end, line) => (line.frozen ? "frozen" : "");
+        timeline.templates.bar_line_class = (start, end, line, index) => (index % 2 ? "even-line" : "");
+        // Scale periods are UTC, so ask for the UTC weekday.
+        timeline.templates.scale_cell_class = (start) => ([0, 6].includes(start.getUTCDay()) ? "weekend" : "");
+        timeline.templates.marker_class = () => "today";
+
+        const view = timeline.init("timeline_here");
+        // The HTML is drawn anew with the view, so listen on the container.
+        view.container.addEventListener("click", (e) => {
+            const button = e.target.closest(".bar-button");
+            if (button) document.getElementById("clicked").textContent = `Details for task ${button.dataset.task}.`;
+        });
+        timeline.parse({
+            view: { name: "Sprint", scale: "day" },
+            tasks: [
+                { id: 1, text: "Spec", start_date: "2026-03-02", duration: "4d", progress: 100, priority: "low", owner: "AR" },
+                { id: 2, text: "Payment API", start_date: "2026-03-05", duration: "8d", priority: "high", flagged: true, progress: 40, owner: "KL" },
+                { id: 3, text: "Website", start_date: "2026-03-09", duration: "7d", progress: 15 },
+                { id: 4, text: "Release", start_date: "2026-03-20", symbol: "star", key: true }
+            ],
+            timelines: [
+                { id: 1, name: "Team", start_date: "2026-03-01", finish_date: "2026-03-24", entries: [
+                    { task: 1, line: 0 }, { task: 2, line: 1 }, { task: 3, line: 2 }, { task: 4, line: 0 }, { marker: "today" }
+                ]}
+            ],
+            markers: [{ id: "today", text: "Today", date: "2026-03-12" }]
+        });
+
+        // The progress value reaches the CSS through a custom property, set once drawn.
+        const applyProgress = () => {
+            for (const task of timeline.serialize().tasks) {
+                const bar = document.querySelector(`#timeline_here .tlv-task[data-task="${task.id}"]`);
+                if (bar && task.progress !== undefined) bar.style.setProperty("--progress", task.progress + "%");
+            }
+        };
+
+        // A real element over the end of the bar, with a task layer. z-index puts it above the task bars.
+        timeline.addTaskLayer(function (task, line) {
+            applyProgress();
+            if (!task.owner) return false;
+            const sizes = this.getTaskPosition(task, line);
+            const el = document.createElement("div");
+            el.className = "avatar";
+            el.textContent = task.owner;
+            el.style.left = sizes.left + sizes.width - 44 + "px";
+            el.style.top = sizes.top + 5 + "px";
+            el.style.width = el.style.height = "18px";
+            return el;
+        });
+    </script>
+</body>
+</html>

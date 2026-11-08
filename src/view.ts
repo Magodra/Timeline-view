@@ -22,8 +22,8 @@ import {
   type Task,
 } from "./model";
 import { addMonths, dateToData, formatDate, parseDate } from "./dates";
-import { label as tickLabel } from "./scale";
-import { attachAt, defaultDisplay, layout, render, unwatchLayout, type Display } from "./render";
+import { fraction, label as tickLabel } from "./scale";
+import { attachAt, defaultDisplay, layout, onLayout, render, unwatchLayout, type Display } from "./render";
 import { toSVG } from "./svg";
 import type {
   AddEntryData,
@@ -39,8 +39,10 @@ import type {
   TaskData,
   TaskEntryData,
   TaskPatchData,
+  TaskPosition,
   TickFormatter,
   TimelineData,
+  TimelineTemplates,
   TimelineUpdateData,
   TimelineViewData,
 } from "./types";
@@ -60,6 +62,14 @@ export interface TimelineOptions extends TimelineFormatters {
    */
   controls?: boolean;
 }
+
+/**
+ * Draws the host's own element for a task (see `addTaskLayer`): the task's
+ * data and the data of the timeline it is being drawn on. Inside a
+ * `function`, `this` is the view. Return an element, or false (or nothing)
+ * for none.
+ */
+export type TaskLayer = (this: TimelineView, task: TaskData, timeline: TimelineData) => HTMLElement | false | null | undefined;
 
 /** How the view writes dates and time-scale labels. Leave one out for the built-in format. */
 export interface TimelineFormatters {
@@ -395,6 +405,8 @@ const isViewData = (body: unknown): body is TimelineViewData =>
 
 export class TimelineView {
   readonly container: HTMLElement;
+  /** Functions giving extra CSS classes to the view's elements. Set them before `parse()`, or call `render()` after. */
+  templates: TimelineTemplates = {};
   private model?: TimelineModel;
   private readonly api?: RestClient;
   private readonly listeners = new Map<keyof TimelineEvents, Set<Handler<never>>>();
@@ -416,6 +428,9 @@ export class TimelineView {
   private highlighted?: HTMLElement;
   /** How dates and scale labels are written (see `setFormatters`). */
   private display: Display = defaultDisplay;
+  /** The host's task layers, by the id `addTaskLayer` returned. */
+  private readonly layers = new Map<number, TaskLayer>();
+  private lastLayerId = 0;
   /** Whether the built-in controls are shown (the `controls` option). */
   private controls = false;
   private formatters: TimelineFormatters = {};
@@ -430,6 +445,7 @@ export class TimelineView {
     this.formatters = { format_date: options.format_date, format_tick: options.format_tick };
     this.controls = options.controls === true;
     this.display = { ...displayOf(this.formatters), controls: this.controls };
+    onLayout(node, () => this.drawLayers());
     node.addEventListener("click", this.onControlClick);
     node.addEventListener("keydown", this.onNameKey);
     node.addEventListener("focusout", this.onNameBlur);
@@ -462,6 +478,95 @@ export class TimelineView {
     this.controls = on;
     this.display = { ...this.display, controls: on };
     if (this.model) this.render();
+  }
+
+  /**
+   * Where a task, or any date span, sits on a timeline's bar, in CSS pixels
+   * relative to the bar's task area (`.tlv-track`, where task layers are
+   * placed), as the view is laid out now. `task` is a task or its id. `from`
+   * and `to` (a `Date` or a date string as in the data) default to the task's
+   * own start and finish; dates outside the timeline's range are held at the
+   * bar's edges, as the task bars are. `timeline` (its id or data) says
+   * which timeline, since a task can be on several. Returns null for an
+   * unknown task, a task not on that timeline, or a view that isn't shown
+   * (nothing can be measured).
+   */
+  getTaskPosition(task: Id | TaskData, timeline: Id | TimelineData, from?: Date | string, to?: Date | string): TaskPosition | null {
+    const model = this.model;
+    const found = model?.findTask(typeof task === "object" ? task.id : task);
+    if (!model || !found) return null;
+    const on = model.findTimeline(typeof timeline === "object" ? timeline.id : timeline);
+    const entry = on?.entries.find((e) => String(e.taskId) === String(found.id));
+    if (!on || !entry) return null;
+    const lines = [...this.container.querySelectorAll<HTMLElement>(".tlv-line:not(.tlv-line--new)")].filter(
+      (n) => n.dataset.timeline === String(on.id),
+    );
+    const line = lines.find((n) => entry.placement === "on" && Number(n.dataset.line) === entry.line) ?? lines[0];
+    const box = line?.getBoundingClientRect();
+    if (!box || box.width === 0) return null;
+    const area = line.parentElement!.getBoundingClientRect();
+    const toDate = (date: Date | string) => (typeof date === "string" ? parseDate(date) : date);
+    const at = (date: Date) => Math.min(1, Math.max(0, fraction(date, on.start, on.finish))) * box.width;
+    const left = at(from === undefined ? found.start : toDate(from));
+    const width = Math.max(0, at(to === undefined ? found.finish : toDate(to)) - left);
+    return { left, right: box.width - left - width, top: box.top - area.top, height: box.height, width };
+  }
+
+  /**
+   * Adds a layer of the host's own elements to the tasks, drawn on the bar
+   * under the task bars. `layer` is called for each task on a bar line, once
+   * per timeline it is on, with the task's data (with any custom attributes)
+   * and the timeline's data; inside a `function`, `this` is this view. It
+   * returns an element, positioned with `getTaskPosition`, or false for none. Layers are drawn again after every
+   * change and resize, and not while the view is hidden. A layer that throws
+   * is logged and skipped for that task. Returns an id for `removeTaskLayer`.
+   */
+  addTaskLayer(layer: TaskLayer): number {
+    const id = ++this.lastLayerId;
+    this.layers.set(id, layer);
+    layout(this.container);
+    return id;
+  }
+
+  /** Removes a layer added with `addTaskLayer`. Returns false if the id is unknown. */
+  removeTaskLayer(id: number): boolean {
+    const removed = this.layers.delete(id);
+    if (removed) {
+      for (const node of this.container.querySelectorAll(".tlv-layers")) node.remove();
+      layout(this.container);
+    }
+    return removed;
+  }
+
+  /** Draws the task layers; part of the view's layout, since they are placed in measured pixels. */
+  private drawLayers(): void {
+    const model = this.model;
+    if (!model) return;
+    for (const track of this.container.querySelectorAll<HTMLElement>(".tlv-track")) {
+      track.querySelector(":scope > .tlv-layers")?.remove();
+      const id = track.closest<HTMLElement>(".tlv-timeline")?.dataset.timeline;
+      const timeline = model.timelines.find((t) => String(t.id) === id);
+      if (!timeline || this.layers.size === 0) continue;
+      const timelineData = timelineToData(timeline);
+      const holder = document.createElement("div");
+      holder.className = "tlv-layers";
+      for (const entry of timeline.entries) {
+        const task = entry.placement === "on" ? model.findTask(entry.taskId) : undefined;
+        if (!task) continue;
+        for (const layer of this.layers.values()) {
+          try {
+            const node = layer.call(this, taskToData(task), timelineData);
+            if (node) {
+              node.classList.add("tlv-layer");
+              holder.append(node);
+            }
+          } catch (error) {
+            console.error("timeline view: a task layer threw", error);
+          }
+        }
+      }
+      track.prepend(holder);
+    }
   }
 
   /**
@@ -830,8 +935,9 @@ export class TimelineView {
 
   /**
    * Changes a task's fields (`text`, `start_date`, `duration` or
-   * `finish_date`, `symbol`, `color`), wherever it appears, and fires
-   * `task_updated`. Send only what changes; `null` clears an optional field.
+   * `finish_date`, `symbol`, `color`, and custom attributes), wherever it
+   * appears, and fires `task_updated`. Send only what changes; `null` clears
+   * an optional field or removes a custom attribute.
    * Setting `duration` drops `finish_date` and the other way round; clearing
    * both makes a milestone. Resolves to false, without the event, if nothing
    * changes. Rejects with a `MoveError` (`not_found`, `invalid`, as `parse()`
@@ -1489,8 +1595,48 @@ export class TimelineView {
     return this.model;
   }
 
-  private render(): void {
-    render(this.container, this.requireModel(), this.display);
+  /**
+   * Draws the view again from its data, for example after changing
+   * `templates`. Every change does this by itself. Does nothing before data
+   * is loaded.
+   */
+  render(): void {
+    if (!this.model) return;
+    render(this.container, this.model, { ...this.display, classes: this.classesOf, taskText: this.taskTextOf });
     this.applySelection();
   }
+
+  /** The `task_text` template's content. One that throws or returns something else is logged, and the plain text is used. */
+  private readonly taskTextOf = (start: Date, end: Date, item: () => unknown): string | Node | undefined => {
+    const template = this.templates.task_text;
+    if (!template) return undefined;
+    try {
+      const content: unknown = template(start, end, item() as TaskData);
+      if (typeof content === "string" || content instanceof Node) return content;
+      console.error("timeline view: templates.task_text returned", content, "instead of a string or node");
+    } catch (error) {
+      console.error("timeline view: templates.task_text threw", error);
+    }
+    return undefined;
+  };
+
+  /** The classes a template gives. One that throws or returns a non-string is logged and gives none. */
+  private readonly classesOf = (
+    name: keyof TimelineTemplates,
+    start: Date,
+    end: Date,
+    item: () => unknown,
+    line?: number,
+  ): string => {
+    const template = this.templates[name] as ((...args: unknown[]) => unknown) | undefined;
+    if (!template) return "";
+    try {
+      const classes = template(start, end, item(), line);
+      if (typeof classes === "string") return classes;
+      if (classes) console.error(`timeline view: templates.${name} returned`, classes, "instead of a string");
+    } catch (error) {
+      console.error(`timeline view: templates.${name} threw`, error);
+    }
+    return "";
+  };
 }

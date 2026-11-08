@@ -693,3 +693,26 @@ describe("compact_lines", () => {
     expect(() => TimelineModel.fromData(bad)).toThrow(/compact_lines must be true or false/);
   });
 });
+
+describe("custom task attributes", () => {
+  it("keeps attributes it doesn't know, through serialize and updateTask", () => {
+    const data = sample();
+    data.tasks[0] = { ...data.tasks[0], planned_start: "2026-03-02", owner: { team: "A" } };
+    const m = TimelineModel.fromData(data);
+    expect(m.findTask(1)!.custom).toEqual({ planned_start: "2026-03-02", owner: { team: "A" } });
+    expect(m.toData().tasks[0]).toEqual(data.tasks[0]);
+    m.updateTask(1, { text: "Renamed" });
+    expect(m.toData().tasks[0]).toMatchObject({ text: "Renamed", planned_start: "2026-03-02" });
+  });
+
+  it("sets and removes them with updateTask", () => {
+    const data = sample();
+    data.tasks[0] = { ...data.tasks[0], planned_start: "2026-03-02", owner: "A" };
+    const m = TimelineModel.fromData(data);
+    m.updateTask(1, { planned_start: "2026-03-05", priority: 2, owner: null });
+    const { id, text, start_date, duration, ...custom } = m.toData().tasks[0];
+    expect([id, text, start_date, duration]).toEqual([1, "Task #1", "2026-04-01", "2d"]);
+    expect(custom).toEqual({ planned_start: "2026-03-05", priority: 2 });
+    expect(m.findTask(1)!.custom).toEqual(custom);
+  });
+});

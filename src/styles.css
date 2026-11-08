@@ -856,6 +856,21 @@
   box-shadow: none;
 }
 
+/* The host's task layers: under the task bars, and not in the way of dragging. */
+.tlv-track {
+  position: relative;
+}
+
+.tlv-layers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.tlv-layer {
+  position: absolute;
+}
+
 /* Built-in controls (the view's `controls` option). */
 .tlv-menu {
   display: flex;

@@ -1,7 +1,7 @@
 import { formatDate } from "./dates";
-import type { DateKind, Scale } from "./types";
+import type { DateKind, Scale, TimelineTemplates } from "./types";
 import type { Tick } from "./scale";
-import { firstLine, lineCount, viewRange, type Entry, type Marker, type Task, type Timeline, type TimelineModel } from "./model";
+import { firstLine, lineCount, markerToData, taskToData, timelineToData, viewRange, type Entry, type Marker, type Task, type Timeline, type TimelineModel } from "./model";
 import { fraction, periodSerial, ticks } from "./scale";
 
 /** Bar line height in px. The drag code reads positions from the DOM, so only rendering uses this. */
@@ -38,6 +38,25 @@ export interface Display {
   tick: (tick: Tick, scale: Scale) => string;
   /** Draw the built-in controls (the view's `controls` option): menu, × on entries, ↑/↓ and an editable name on labels. */
   controls?: boolean;
+  /** The `task_text` template's content for a task's bar; undefined for its plain text. */
+  taskText?: (start: Date, end: Date, item: () => unknown) => string | Node | undefined;
+  /** The extra classes a template gives (the view's `templates`); `item` is only built if there is one. */
+  classes?: (name: keyof TimelineTemplates, start: Date, end: Date, item: () => unknown, line?: number) => string;
+}
+
+/** Adds the classes the template `name` gives to `node`, and returns it. */
+function styled<T extends HTMLElement>(
+  node: T,
+  display: Display,
+  name: keyof TimelineTemplates,
+  start: Date,
+  end: Date,
+  item: () => unknown,
+  line?: number,
+): T {
+  const classes = display.classes?.(name, start, end, item, line).split(/\s+/).filter(Boolean);
+  if (classes?.length) node.classList.add(...classes);
+  return node;
 }
 
 /** The built-in formats: ISO-style dates in UTC, English month names. No controls. */
@@ -105,7 +124,7 @@ export function render(root: HTMLElement, model: TimelineModel, display: Display
   root.replaceChildren(
     ...model.timelines.map((t, i) => renderTimeline(model, t, i, markers.get(String(t.id)) ?? [], display)),
   );
-  root.append(...markerLines(model, markers));
+  root.append(...markerLines(model, markers, display));
   // The view's name, if it has one, as a heading above the timelines.
   if (model.view.name.trim()) {
     const title = el("div", "tlv-title", model.view.name);
@@ -134,6 +153,14 @@ export function layout(root: HTMLElement): void {
   layoutConnectors(root);
   layoutTicks(root);
   layoutMarkerLines(root);
+  layoutHooks.get(root)?.();
+}
+
+const layoutHooks = new WeakMap<HTMLElement, () => void>();
+
+/** Runs `hook` at the end of every layout of `root`, for what the view places in measured pixels. */
+export function onLayout(root: HTMLElement, hook: () => void): void {
+  layoutHooks.set(root, hook);
 }
 
 /** Space, in px, kept between two tick labels. */
@@ -307,7 +334,7 @@ function markerColor(node: HTMLElement, marker: Marker): HTMLElement {
  * puts the date somewhere else. Each element sits in the view's root;
  * `layoutMarkerLines` measures the bars to place it.
  */
-function markerLines(model: TimelineModel, plan: Map<string, MarkerPart[]>): HTMLElement[] {
+function markerLines(model: TimelineModel, plan: Map<string, MarkerPart[]>, display: Display): HTMLElement[] {
   const lines: HTMLElement[] = [];
   for (const marker of model.markers) {
     const rows = model.timelines.flatMap((t) => {
@@ -319,7 +346,7 @@ function markerLines(model: TimelineModel, plan: Map<string, MarkerPart[]>): HTM
       if (run.length === 0) return;
       const first = run[0];
       const last = run[run.length - 1];
-      const line = markerColor(el("span", "tlv-marker-line"), marker);
+      const line = styled(markerColor(el("span", "tlv-marker-line"), marker), display, "marker_class", marker.date, marker.date, () => markerToData(marker));
       Object.assign(line.dataset, {
         marker: String(marker.id),
         from: String(first.timeline.id),
@@ -422,7 +449,7 @@ function markerLabel(part: MarkerPart, placement: "above" | "below", display: Di
   connector.style.left = pct(at);
   connector.style[placement === "above" ? "bottom" : "top"] = "0";
 
-  const box = markerColor(el("div", "tlv-marker-label"), marker);
+  const box = styled(markerColor(el("div", "tlv-marker-label"), marker), display, "marker_class", marker.date, marker.date, () => markerToData(marker));
   // Draggable like a callout (data-entry); drag.ts tells it apart by data-marker.
   Object.assign(box.dataset, { entry: "", marker: String(marker.id), at: String(at), x: String(x), y: String(y), reach: "0" });
   box.style.marginLeft = `calc(${pct(at)} + ${x}px)`;
@@ -444,6 +471,8 @@ function renderTimeline(
   const row = el("section", `tlv-timeline tlv-timeline--name-${model.view.namePosition}`);
   row.dataset.timeline = String(timeline.id);
   row.setAttribute("aria-label", timeline.name);
+  const data = () => timelineToData(timeline);
+  styled(row, display, "timeline_class", timeline.start, timeline.finish, data);
 
   // The span holds the bar and its callout areas. It fills the width, or with
   // `absolute` sits at the timeline's place on the view's common time axis.
@@ -464,7 +493,7 @@ function renderTimeline(
   }
   const center = el("div", "tlv-center");
   center.append(spanNode);
-  row.append(renderName(timeline, index, model.timelines.length, display), center);
+  row.append(styled(renderName(timeline, index, model.timelines.length, display), display, "timeline_name_class", timeline.start, timeline.finish, data), center);
   return row;
 }
 
@@ -492,7 +521,8 @@ function dateLabel(kind: "start" | "finish", caption: string, date: Date, displa
 function renderBar(model: TimelineModel, timeline: Timeline, display: Display): HTMLElement {
   const { scale, showDates } = model.view;
   const { start, finish } = timeline;
-  const bar = el("div", "tlv-bar");
+  const data = () => timelineToData(timeline);
+  const bar = styled(el("div", "tlv-bar"), display, "timeline_bar_class", start, finish, data);
   if (showDates) bar.append(dateLabel("start", "Start", start, display), dateLabel("finish", "Finish", finish, display));
 
   // Time scale: periods between ticks, alternately light and darker, with the
@@ -501,12 +531,12 @@ function renderBar(model: TimelineModel, timeline: Timeline, display: Display): 
   const scaleRow = el("div", "tlv-scale");
   const tickList = ticks(start, finish, scale);
   const edges = [
-    { at: 0, serial: periodSerial(start, scale) },
-    ...tickList.filter((t) => t.at > 0 && t.at < 1).map((t) => ({ at: t.at, serial: t.serial })),
-    { at: 1, serial: 0 },
+    { at: 0, serial: periodSerial(start, scale), date: start },
+    ...tickList.filter((t) => t.at > 0 && t.at < 1).map((t) => ({ at: t.at, serial: t.serial, date: t.date })),
+    { at: 1, serial: 0, date: finish },
   ];
   for (let i = 0; i < edges.length - 1; i++) {
-    const period = el("span", `tlv-period${edges[i].serial % 2 ? " tlv-period--alt" : ""}`);
+    const period = styled(el("span", `tlv-period${edges[i].serial % 2 ? " tlv-period--alt" : ""}`), display, "scale_cell_class", edges[i].date, edges[i + 1].date, data);
     period.style.left = pct(edges[i].at);
     period.style.width = pct(edges[i + 1].at - edges[i].at);
     scaleRow.append(period);
@@ -535,7 +565,7 @@ function renderBar(model: TimelineModel, timeline: Timeline, display: Display): 
   const lines = lineCount(timeline);
   track.append(lineNode(first, true));
   for (let line = first; line < lines; line++) {
-    const node = lineNode(line, false);
+    const node = styled(lineNode(line, false), display, "bar_line_class", start, finish, data, line);
     for (const entry of timeline.entries) {
       if (entry.placement === "on" && entry.line === line) node.append(renderOnEntry(model, timeline, entry, display));
     }
@@ -551,26 +581,34 @@ function renderOnEntry(model: TimelineModel, timeline: Timeline, entry: Entry, d
   const task = model.findTask(entry.taskId)!;
   const { from, to, center, before, after } = span(timeline, task);
   const title = `${task.text} (${taskDates(task, display)})`;
+  const item = () => taskToData(task);
 
   if (task.isMilestone) {
-    const node = entryElement("tlv-milestone", timeline, entry, center);
+    const node = styled(entryElement("tlv-milestone", timeline, entry, center), display, "milestone_class", task.start, task.finish, item);
     node.style.left = pct(from);
     node.title = title;
     applyColor(node, task);
     node.append(
       el("span", `tlv-symbol tlv-symbol--${task.symbol ?? model.view.milestoneSymbol}`),
-      el("span", "tlv-milestone-label", task.text),
+      styled(el("span", "tlv-milestone-label", task.text), display, "milestone_text_class", task.start, task.finish, item),
     );
     if (display.controls) node.append(removeControl());
     return node;
   }
 
-  const node = entryElement("tlv-task", timeline, entry, center);
+  const node = styled(entryElement("tlv-task", timeline, entry, center), display, "task_class", task.start, task.finish, item);
   placeSpan(node, "tlv-task", from, to);
   node.title = title;
   applyColor(node, task);
   // The stylesheet moves the label beside the bar when the bar is too narrow for it.
-  node.append(el("span", "tlv-task-label", task.text));
+  const label = styled(el("span", "tlv-task-label", task.text), display, "task_text_class", task.start, task.finish, item);
+  const content = display.taskText?.(task.start, task.finish, item);
+  if (content !== undefined) {
+    if (typeof content === "string") label.innerHTML = content;
+    else label.replaceChildren(content);
+    label.dataset.plainText = task.text; // what the SVG export writes
+  }
+  node.append(label);
   // A task that continues past the timeline's start or finish gets an arrow at that end.
   continuation(node, "tlv-task", before, after);
   if (before) node.append(el("span", "tlv-arrow tlv-arrow--before"));
@@ -610,12 +648,13 @@ function renderCalloutArea(model: TimelineModel, timeline: Timeline, placement: 
       reach = EDGE_BAR_HEIGHT;
     }
     applyColor(marker, task);
+    styled(marker, display, "callout_marker_class", task.start, task.finish, () => taskToData(task));
 
     const connector = el("div", "tlv-connector");
     connector.style.left = pct(center);
     connector.style[placement === "above" ? "bottom" : "top"] = `${reach}px`;
 
-    const box = entryElement("tlv-callout", timeline, entry, center);
+    const box = styled(entryElement("tlv-callout", timeline, entry, center), display, "callout_class", task.start, task.finish, () => taskToData(task));
     Object.assign(box.dataset, { x: String(x), y: String(y), reach: String(reach) });
     box.style.marginLeft = `calc(${pct(center)} + ${x}px)`;
     // y is from the bar to the label's near edge: negative above, positive below.

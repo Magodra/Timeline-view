@@ -1,9 +1,10 @@
-import type { EntryTargetData, Id, MarkerData, MarkerPatchData, MovePatchData, Offset, TaskData, TaskPatchData, TimelineData, TimelineUpdateData, TimelineViewData } from "./types";
+import type { EntryTargetData, Id, MarkerData, MarkerPatchData, MovePatchData, Offset, TaskData, TaskPatchData, TimelineData, TimelineTemplates, TimelineUpdateData, TimelineViewData } from "./types";
 import {
   TimelineView,
   type TimelineEventName,
   type TimelineEvents,
   type TimelineHandlers,
+  type TaskLayer,
   type TimelineFormatters,
   type TimelineOptions,
 } from "./view";
@@ -28,6 +29,7 @@ export {
   TimelineView,
   defaultFormatDate,
   defaultFormatTick,
+  type TaskLayer,
   type TimelineFormatters,
   type EntryAddedEvent,
   type EntryMovedEvent,
@@ -62,6 +64,13 @@ export {
  */
 let current: TimelineView | undefined;
 
+/** Escapes text for use in the HTML a `task_text` template returns. */
+export const escapeHtml = (text: string): string =>
+  text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** The default instance's class templates: fill it in before or after `init`, and before `parse` (or call `render` after). */
+export const templates: TimelineTemplates = {};
+
 function instance(): TimelineView {
   if (!current) throw new Error("Call timeline.init(container) first");
   return current;
@@ -70,6 +79,7 @@ function instance(): TimelineView {
 export function init(container: string | HTMLElement, options?: TimelineOptions): TimelineView {
   current?.destroy();
   current = new TimelineView(container, options);
+  current.templates = templates;
   return current;
 }
 
@@ -79,6 +89,11 @@ export const serialize = () => instance().serialize();
 export const toSVG = () => instance().toSVG();
 export const resize = () => instance().resize();
 export const isDragging = () => instance().isDragging();
+export const render = () => instance().render();
+export const getTaskPosition = (task: Id | TaskData, timeline: Id | TimelineData, from?: Date | string, to?: Date | string) =>
+  instance().getTaskPosition(task, timeline, from, to);
+export const addTaskLayer = (layer: TaskLayer) => instance().addTaskLayer(layer);
+export const removeTaskLayer = (id: number) => instance().removeTaskLayer(id);
 export const setFormatters = (formatters: TimelineFormatters) => instance().setFormatters(formatters);
 export const setControls = (on: boolean) => instance().setControls(on);
 export const moveEntry = (timelineId: Id, taskId: Id, patch: MovePatchData) =>

@@ -77,7 +77,9 @@ class SvgWriter {
    * off at a box, as `overflow: hidden` does on screen.
    */
   text(el: Element | null, clipTo?: Box): void {
-    if (!el?.textContent) return;
+    // Custom content in a task's bar (`task_text`) is exported as the task's plain text.
+    const content = (el as HTMLElement | null)?.dataset?.plainText ?? el?.textContent;
+    if (!el || !content) return;
     const style = getComputedStyle(el);
     const range = document.createRange();
     range.selectNodeContents(el);
@@ -98,7 +100,7 @@ class SvgWriter {
     } else {
       attrs = `x="${num(b.x)}" y="${num(cy)}"`;
     }
-    const text = `<text ${attrs} dominant-baseline="central" fill="${style.color}"${font}>${escapeXml(el.textContent)}</text>`;
+    const text = `<text ${attrs} dominant-baseline="central" fill="${style.color}"${font}>${escapeXml(content)}</text>`;
     // The clip goes on a wrapping group: on the text itself it would turn with the text's rotation.
     this.add(clipTo ? `<g clip-path="url(#${this.clip(clipTo)})">${text}</g>` : text);
   }
@@ -212,6 +214,12 @@ function drawBar(out: SvgWriter, bar: HTMLElement): void {
   out.add("</g>");
   // Tick labels that the layout hid for lack of room stay out, as on screen.
   for (const tick of scale.querySelectorAll<HTMLElement>(".tlv-tick")) if (!tick.hidden) out.text(tick, sb);
+
+  // The host's task layers, as plain rectangles, under the tasks.
+  for (const layer of bar.querySelectorAll<HTMLElement>(".tlv-layer")) {
+    const color = getComputedStyle(layer).backgroundColor;
+    if (isVisible(color)) out.rect(out.box(layer), color);
+  }
 
   // Tasks and milestones on the bar lines.
   for (const task of bar.querySelectorAll<HTMLElement>(".tlv-task")) {

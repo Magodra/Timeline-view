@@ -345,7 +345,7 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           description: |
-            Invalid values: an unknown field, `text` that isn't a string,
+            Invalid values: an `id`, `text` that isn't a string,
             `start_date` cleared or not a date, both `duration` and
             `finish_date`, a finish before the start, a bad duration, an unknown
             `symbol`, or `color` that isn't a CSS color.
@@ -631,7 +631,8 @@ components:
     Task:
       type: object
       description: |
-        The finish is `start_date + duration`, or given as `finish_date`: one
+        Attributes other than those listed here are the host's own and are
+        kept with the task. The finish is `start_date + duration`, or given as `finish_date`: one
         or the other, not both. Without either (or with a zero duration, or a
         `finish_date` equal to `start_date`) the task is a milestone.
       required: [id, text, start_date]
@@ -799,8 +800,10 @@ components:
 
     TaskPatch:
       type: object
-      additionalProperties: false
-      description: Send only what changes. `null` clears an optional field.
+      description: |
+        Send only what changes. `null` clears an optional field. Other
+        properties are the host's custom attributes: set, or removed with
+        `null`. `id` can't be changed.
       properties:
         text: { type: string }
         start_date: { $ref: "#/components/schemas/Date" }

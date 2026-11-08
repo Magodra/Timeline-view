@@ -359,6 +359,7 @@ function Plan({ initialData }) {
 | Prop | Meaning |
 |------|---------|
 | `data` | The data to show, as for `parse()`. It is loaded when the component mounts and again whenever you pass a different object; re-rendering with the same object doesn't reload it. |
+| `templates` | [Class templates](#styling-with-class-templates). Keep the object stable; a new one redraws the view. |
 | `controls` | Show the [built-in controls](#built-in-controls). Changing it redraws the view. |
 | `formatDate`, `formatTick` | As the `format_date` and `format_tick` options (see [Showing dates your way](#showing-dates-your-way)). Changing them redraws the view. |
 | `apiUrl`, `fetch` | As the `api_url` and `fetch` options: with `apiUrl`, changes are saved to the REST backend. Changing either creates a new view. |
@@ -369,6 +370,141 @@ function Plan({ initialData }) {
 | `ref` | The `TimelineView`, for everything else: `moveEntry`, `updateTask`, `selectTask`, `toSVG`, `whenSaved`, ... It is `null` until mounted. |
 
 The component creates the view when it mounts and destroys it when it unmounts, and works under `StrictMode`. Changes made in the view (dragging, or calls through the `ref`) stay in the view; you don't need to feed them back through `data`. Pass new `data` only to show something else. Inside a dockview panel, give it `style={{ height: "100%" }}` (see [Resizing, and docking panels](#resizing-and-docking-panels)).
+
+## Finding a task's position
+
+`timeline.getTaskPosition(task, timeline, from, to)` tells where a task, or any date span, sits on a timeline's bar, so you can place your own elements there:
+
+```js
+const pos = timeline.getTaskPosition("build", "dev");
+// { left: 310, right: 280, top: 14, height: 28, width: 20 }
+const part = timeline.getTaskPosition("build", "dev", new Date("2026-04-01T00:00:00Z"), new Date("2026-04-03T00:00:00Z"));
+```
+
+| Field | Meaning (CSS pixels, relative to the bar's task area, `.tlv-track`) |
+|-------|---------|
+| `left` | From the area's left edge to the start of the span. |
+| `right` | From the end of the span to the area's right edge. |
+| `top` | From the area's top edge to the task's line (the first line for a callout). |
+| `height` | The height of a bar line. |
+| `width` | From the first date to the second; 0 for a milestone. |
+
+`task` is a task or its id, and `timeline` a timeline or its id (a task can be on several). `from` and `to` are a `Date` or a date string as in the data, and default to the task's own start and finish, and dates outside the timeline's range are held at the bar's edges. The values describe the layout right now, so ask again after the view is resized. It returns `null` for an unknown task, a task that isn't on that timeline, or a view that isn't shown.
+
+## Styling with class templates
+
+`timeline.templates` holds functions that return extra CSS classes for the view's elements, so styling can depend on the data, including your own attributes on tasks and timelines:
+
+```js
+timeline.templates.task_class = (start, end, task) => (task.priority === "high" ? "urgent" : "");
+timeline.templates.scale_cell_class = (start) => ([0, 6].includes(start.getUTCDay()) ? "weekend" : "");
+timeline.init("timeline_here");
+timeline.parse(data);
+```
+
+```css
+.tlv-task.urgent { --tlv-task: #cf222e; }
+.tlv-period.weekend { background: #fde8e8; }
+```
+
+| Template | Arguments | Element |
+|----------|-----------|---------|
+| `task_text` | `(start, end, task)` | Not a class: the HTML or node inside a task's bar. See [below](#adding-your-own-content-to-task-bars). |
+| `task_class` | `(start, end, task)` | A task's bar, `.tlv-task` |
+| `task_text_class` | `(start, end, task)` | The text in the bar, `.tlv-task-label` |
+| `milestone_class` | `(start, end, task)` | A milestone on a bar line, `.tlv-milestone` |
+| `milestone_text_class` | `(start, end, task)` | A milestone's text, `.tlv-milestone-label` |
+| `callout_class` | `(start, end, task)` | A callout's label, `.tlv-callout` |
+| `callout_marker_class` | `(start, end, task)` | A callout's marker on the bar's edge, `.tlv-edge-bar` or `.tlv-edge-symbol` |
+| `timeline_class` | `(start, end, timeline)` | A timeline's row, `.tlv-timeline` |
+| `timeline_bar_class` | `(start, end, timeline)` | A timeline's bar, `.tlv-bar` |
+| `timeline_name_class` | `(start, end, timeline)` | A timeline's name label, `.tlv-name` |
+| `bar_line_class` | `(start, end, timeline, line)` | One bar line, `.tlv-line`; `line` is its 0-based index |
+| `scale_cell_class` | `(start, end, timeline)` | One period of the time scale, `.tlv-period` |
+| `marker_class` | `(start, end, marker)` | A marker's line and label, `.tlv-marker-line` and `.tlv-marker-label` |
+
+`start` and `end` are `Date`s: the task's start and finish (the same for a milestone), the timeline's range, the period's limits, or the marker's date (twice). `task`, `timeline` and `marker` are in the data format. Scale periods are UTC, so use `getUTCDay()` and the like on them. Return one class or several separated by spaces, or `""` for none. A template that throws is logged and adds nothing. Change a color through the theme's custom properties (such as `--tlv-task`), as above, and it also applies to the drag ghost and `toSVG()`.
+
+Templates run on every draw. Set them before `parse()`, or call `timeline.render()` afterwards. `timeline.templates` belongs to the default instance and can be filled in before `init`; a `new TimelineView` has its own `view.templates`. In React, pass a `templates` prop, and keep the object stable (outside the component, or with `useMemo`), since a new object redraws the view.
+
+### Adding your own content to task bars
+
+A class is also a way to add content to a bar. CSS can draw it with `::before` and `::after`, which suits icons, badges and progress bands. The bar is `position: absolute`, so content inside it can be placed relative to the bar:
+
+```js
+timeline.templates.task_class = (start, end, task) => (task.flagged ? "flagged" : "");
+```
+
+```css
+.tlv-task.flagged::after {
+  content: "⚑";
+  position: absolute;
+  right: 5px;
+  top: 1px;
+  color: white;
+  pointer-events: none;   /* so the bar can still be dragged by it */
+}
+```
+
+To put real elements inside the bar, use the `task_text` template. It replaces the bar's text with the HTML you return, or a DOM node:
+
+```js
+timeline.templates.task_text = (start, end, task) =>
+  `${timeline.escapeHtml(task.text)} <button class="details" data-task="${task.id}">Details</button>`;
+
+// The view is redrawn after every change, so listen on the container:
+document.getElementById("timeline_here").addEventListener("click", (e) => {
+  const button = e.target.closest(".details");
+  if (button) showDetails(button.dataset.task);
+});
+```
+
+A string is inserted as HTML, so **escape anything that isn't trusted**, such as task names from users, with `timeline.escapeHtml`; otherwise they can inject scripts into your page. Return a DOM node instead to attach listeners to it directly. Pressing a `button`, link or form field in a bar doesn't start a drag, click the task or select it; pressing anything else in the bar drags as usual. If the template throws, the bar shows the task's text. `toSVG()` exports the task's plain text. The bar's height (20 px of text) and width limit what fits, and content that doesn't fit is cut off.
+
+For elements that shouldn't be limited to the bar's text (an avatar at its end, something outside it), use a [task layer](#task-layers) and give the element a `z-index` to raise it above the bars:
+
+```js
+timeline.addTaskLayer(function (task, timeline) {
+  if (!task.owner) return false;
+  const sizes = this.getTaskPosition(task, timeline);
+  const el = document.createElement("div");
+  el.className = "avatar";               // .avatar { z-index: 1; ... }
+  el.textContent = task.owner;
+  el.style.left = sizes.left + sizes.width - 26 + "px";
+  el.style.top = sizes.top + 5 + "px";
+  return el;
+});
+```
+
+Pseudo-elements aren't included in `toSVG()`, and a layer is exported only as a rectangle in its background color. [examples/templates.html](../examples/templates.html) shows all of this.
+
+## Task layers
+
+`timeline.addTaskLayer(layer)` draws your own elements on the bars, for example each task's planned period behind its actual bar. Any attributes on a task that the view doesn't know are kept with it, so you can put what a layer needs in the data:
+
+```js
+timeline.parse({ /* ... */ tasks: [
+  { id: 1, text: "Design", start_date: "2026-03-09", duration: "3w", planned_start: "2026-03-02", planned_end: "2026-03-23" }
+] });
+
+timeline.addTaskLayer(function draw_planned(task, timeline) {
+  if (task.planned_start && task.planned_end) {
+    const sizes = this.getTaskPosition(task, timeline, task.planned_start, task.planned_end);
+    const el = document.createElement("div");
+    el.className = "baseline";
+    el.style.left = sizes.left + "px";
+    el.style.top = sizes.top + "px";
+    el.style.width = sizes.width + "px";
+    el.style.height = sizes.height + "px";
+    return el;
+  }
+  return false;
+});
+```
+
+The function is called for each task on a bar line, once per timeline it is on, with the task's data (including your attributes) and that timeline's data. Inside a `function`, `this` is the view; an arrow function can use your own variable for the view instead. Pass the timeline on to `getTaskPosition`, as above, so the element lands on the right timeline. Return an element, or `false` for none; the view makes it absolutely positioned. Layers lie under the task bars and don't catch the mouse, so dragging works as usual; set `z-index` or `pointer-events` on your element to change that. Tasks shown as callouts have no layer.
+
+Layers are drawn again after every change and resize, so keep the function quick and without side effects. It isn't called while the view is hidden. A function that throws is logged and skipped for that task. `addTaskLayer` returns an id for `removeTaskLayer(id)`; with React, call it through the `ref`. `toSVG()` draws layers as rectangles filled with their background color. See [examples/layers.html](../examples/layers.html).
 
 ## Exporting as SVG
 
@@ -442,7 +578,7 @@ Set `selection: false` in the view to turn selection off: clicks still fire `onT
 
 ## Editing tasks
 
-`timeline.updateTask(id, changes)` changes a task wherever it appears: its `text`, `start_date`, `duration` or `finish_date`, `symbol` or `color`. Give only what changes; `null` clears an optional field.
+`timeline.updateTask(id, changes)` changes a task wherever it appears: its `text`, `start_date`, `duration` or `finish_date`, `symbol`, `color`, or your own custom attributes. Give only what changes; `null` clears an optional field or removes a custom attribute. Only `id` can't be changed.
 
 ```js
 timeline.updateTask("build", { text: "Build and test" });
