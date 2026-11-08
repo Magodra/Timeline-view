@@ -23,7 +23,9 @@
     "build": "vite build && tsc -p tsconfig.build.json && node scripts/export-examples.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "version": "node scripts/update-readme-version.mjs && git add README.md",
+    "postversion": "git push --follow-tags"
   },
   "devDependencies": {
     "jsdom": "^31.0.0",
