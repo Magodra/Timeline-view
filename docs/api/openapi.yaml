@@ -98,18 +98,25 @@ paths:
         required: true
         schema: { $ref: "#/components/schemas/Id" }
     patch:
-      summary: Rename a timeline, or move it in the stack
+      summary: Change a timeline (name, dates), or move it in the stack
       operationId: updateTimeline
       description: |
-        Send only the fields that change. `position` is the timeline's 0-based
-        index in the stack after the move. The client sends one request per
-        rename and per move (`moveTimelineUp`/`moveTimelineDown`), in order.
+        Send only the fields that change. `start_date` and `finish_date` change
+        the timeline's range; the finish must stay after the start, and
+        entries outside the new range stay. `position` is the timeline's
+        0-based index in the stack after the move. The client sends one
+        request per change (`updateTimeline`, `renameTimeline`,
+        `moveTimelineUp`/`moveTimelineDown`), in order.
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/TimelinePatch" }
-            example: { position: 0, version: 7 }
+            examples:
+              move:
+                value: { position: 0, version: 7 }
+              dates:
+                value: { start_date: "2026-02-01", finish_date: "2026-07-01", version: 7 }
       responses:
         "200":
           description: Updated. Returns the new version and the timelines' order.
@@ -121,7 +128,10 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
         "422":
-          description: "`name` isn't a string, or `position` is out of range (0 to the number of timelines - 1)."
+          description: |
+            An unknown field, `name` that isn't a string, a bad date, a finish
+            not after the start, or `position` out of range (0 to the number of
+            timelines - 1).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -205,6 +215,312 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      summary: Take a task off a timeline
+      operationId: removeEntry
+      description: |
+        Removes the entry, then trims the timeline's bar lines as after a move.
+        The task stays in the view, also when it is now on no timeline.
+      parameters:
+        - name: version
+          in: query
+          description: The view version the client last saw.
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Removed. Returns the timeline after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MoveResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /views/{view_id}/timelines/{timeline_id}/entries:
+    parameters:
+      - $ref: "#/components/parameters/ViewId"
+      - name: timeline_id
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+    post:
+      summary: Add a task to a timeline
+      operationId: addEntry
+      description: |
+        Puts a task on the timeline, as a drop from outside the view does.
+        `task` is the id of a task the view has, or a new task's data, which
+        is added to the view's tasks in the same change. Where it goes follows
+        the move rules: without `placement`, a `callout_offset` makes a callout
+        (above if `y ≤ 0`, below if `y > 0`), otherwise the entry goes on the
+        bar, on `line` (default 0); `new_line: true` inserts a line there. A
+        callout without an offset gets the default (`{ x: 0, y: ∓16 }`).
+        Afterwards the timeline is trimmed as after a move.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddEntry" }
+            examples:
+              newTask:
+                summary: A new task, as a label above the bar
+                value:
+                  task: { id: 9, text: "Review", start_date: "2026-04-15", duration: "2d" }
+                  placement: above
+                  callout_offset: { x: 10, y: -30 }
+                  version: 7
+              knownTask:
+                summary: A task the view has, on a new top line
+                value: { task: 3, placement: "on", line: 0, new_line: true, version: 7 }
+      responses:
+        "200":
+          description: Added. Returns the timeline after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MoveResult" }
+        "404":
+          description: The view or timeline doesn't exist, or `task` is an id the view has no task for.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: |
+            `version` is stale, the task is already on this timeline, or `task`
+            is new task data with an id that is in use. The body is the current
+            view; the client re-renders from it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TimelineViewData" }
+        "422":
+          description: |
+            Invalid values: as for a move (`placement`, `line`, `new_line`,
+            `callout_offset`), or invalid new task data (bad dates or duration,
+            both `duration` and `finish_date`, ...).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /views/{view_id}/tasks/{task_id}:
+    parameters:
+      - $ref: "#/components/parameters/ViewId"
+      - name: task_id
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+    patch:
+      summary: Change a task
+      operationId: updateTask
+      description: |
+        Changes a task's fields, wherever it appears. Send only what changes;
+        `null` clears an optional field. The finish is given one way: setting
+        `duration` drops `finish_date` and the other way round, and clearing
+        both makes the task a milestone. The result must be valid as in a
+        loaded view.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskPatch" }
+            examples:
+              rename:
+                value: { text: "Specification", version: 7 }
+              reschedule:
+                summary: New start and a fixed finish date
+                value: { start_date: "2026-04-06", finish_date: "2026-04-24", version: 7 }
+              milestone:
+                summary: Make it a milestone
+                value: { duration: null, finish_date: null, symbol: "star", version: 7 }
+      responses:
+        "200":
+          description: Changed. Returns the task as the server now has it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          description: |
+            Invalid values: an unknown field, `text` that isn't a string,
+            `start_date` cleared or not a date, both `duration` and
+            `finish_date`, a finish before the start, a bad duration, an unknown
+            `symbol`, or `color` that isn't a CSS color.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      summary: Remove a task
+      operationId: removeTask
+      description: |
+        Removes the task from the view and from every timeline it is on; those
+        timelines are trimmed as after a move.
+      parameters:
+        - name: version
+          in: query
+          description: The view version the client last saw.
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Removed. Returns the timelines the task was on, after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MoveResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /views/{view_id}/markers:
+    parameters:
+      - $ref: "#/components/parameters/ViewId"
+    post:
+      summary: Add a marker
+      operationId: addMarker
+      description: |
+        Adds a marker, valid as in a loaded view. A `global` marker shows on
+        every timeline; any other on none until it is shown on one
+        (`PUT .../timelines/{timeline_id}/markers/{marker_id}`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddMarker" }
+            example:
+              marker: { id: "golive", text: "Go-live", date: "2026-05-04", marker_offset: { x: 0, y: -16 } }
+              version: 7
+      responses:
+        "200":
+          description: Added. Returns the marker as the server now has it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MarkerResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            `version` is stale, or a marker with this id exists. The body is the
+            current view; the client re-renders from it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TimelineViewData" }
+        "422":
+          description: Invalid marker (missing id, bad date, color or `marker_offset`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /views/{view_id}/markers/{marker_id}:
+    parameters:
+      - $ref: "#/components/parameters/ViewId"
+      - name: marker_id
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+    patch:
+      summary: Change a marker, or move its label
+      operationId: updateMarker
+      description: |
+        Send only what changes. Dragging a marker's label sends
+        `{ marker_offset }`. `color: null` goes back to the theme's color.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MarkerPatch" }
+            examples:
+              moveLabel:
+                value: { marker_offset: { x: 40, y: 24 }, version: 7 }
+              edit:
+                value: { text: "Code freeze", date: "2026-04-20", color: "purple", version: 7 }
+      responses:
+        "200":
+          description: Changed. Returns the marker as the server now has it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MarkerResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          description: An unknown field, or a bad `text`, `date`, `color`, `global` or `marker_offset`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      summary: Remove a marker
+      operationId: removeMarker
+      description: Removes the marker and every `{ marker }` entry for it.
+      parameters:
+        - name: version
+          in: query
+          description: The view version the client last saw.
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Removed. Returns the timelines that had an entry for it, after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MoveResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /views/{view_id}/timelines/{timeline_id}/markers/{marker_id}:
+    parameters:
+      - $ref: "#/components/parameters/ViewId"
+      - name: timeline_id
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+      - name: marker_id
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+    put:
+      summary: Show a marker on a timeline
+      operationId: showMarker
+      description: Adds the timeline's `{ marker }` entry for it. Idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: integer, description: The view version the client last saw. }
+            example: { version: 7 }
+      responses:
+        "200":
+          description: Shown. Returns the timeline after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MoveResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      summary: Stop showing a marker on a timeline
+      operationId: hideMarker
+      description: Removes the timeline's `{ marker }` entry for it. 404 if it has none.
+      parameters:
+        - name: version
+          in: query
+          description: The view version the client last saw.
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Hidden. Returns the timeline after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MoveResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
 components:
   parameters:
@@ -444,6 +760,84 @@ components:
           type: integer
           description: The view version the client last saw.
 
+    AddMarker:
+      type: object
+      required: [marker]
+      properties:
+        marker: { $ref: "#/components/schemas/Marker" }
+        version: { type: integer, description: The view version the client last saw. }
+
+    MarkerPatch:
+      type: object
+      additionalProperties: false
+      description: Send only what changes.
+      properties:
+        text: { type: string }
+        date: { $ref: "#/components/schemas/Date" }
+        color: { type: [string, "null"], description: "Any CSS color; null for the theme's." }
+        global: { type: boolean }
+        marker_offset: { $ref: "#/components/schemas/Offset" }
+        version: { type: integer, description: The view version the client last saw. }
+
+    MarkerResult:
+      type: object
+      required: [version, marker]
+      properties:
+        version: { type: integer }
+        marker: { $ref: "#/components/schemas/Marker" }
+
+    TaskPatch:
+      type: object
+      additionalProperties: false
+      description: Send only what changes. `null` clears an optional field.
+      properties:
+        text: { type: string }
+        start_date: { $ref: "#/components/schemas/Date" }
+        duration:
+          type: [string, "null"]
+          pattern: '^\d+[hdwmy]$'
+          description: Setting it drops `finish_date`.
+        finish_date:
+          oneOf: [{ $ref: "#/components/schemas/Date" }, { type: "null" }]
+          description: Setting it drops `duration`.
+        symbol:
+          oneOf: [{ $ref: "#/components/schemas/MilestoneSymbol" }, { type: "null" }]
+        color: { type: [string, "null"], description: Any CSS color. }
+        version: { type: integer, description: The view version the client last saw. }
+
+    TaskResult:
+      type: object
+      required: [version, task]
+      properties:
+        version: { type: integer }
+        task: { $ref: "#/components/schemas/Task" }
+
+    AddEntry:
+      type: object
+      required: [task]
+      properties:
+        task:
+          description: The id of a task the view has, or a new task's data.
+          oneOf:
+            - { $ref: "#/components/schemas/Id" }
+            - { $ref: "#/components/schemas/Task" }
+        placement:
+          allOf: [{ $ref: "#/components/schemas/Placement" }]
+          description: Target area. Without it, `callout_offset` makes a callout; otherwise the bar.
+        line:
+          type: integer
+          minimum: 0
+          description: Bar line; only with placement `on`. Default 0.
+        new_line:
+          type: boolean
+          description: With placement `on`, insert a new bar line at `line`; the lines from there down shift by one.
+        callout_offset:
+          allOf: [{ $ref: "#/components/schemas/Offset" }]
+          description: Label position, for `above` and `below`. Default `{ x: 0, y: ∓16 }`.
+        version:
+          type: integer
+          description: The view version the client last saw.
+
     MoveResult:
       type: object
       required: [version, timelines]
@@ -476,8 +870,11 @@ components:
 
     TimelinePatch:
       type: object
+      additionalProperties: false
       properties:
         name: { type: string }
+        start_date: { $ref: "#/components/schemas/Date" }
+        finish_date: { $ref: "#/components/schemas/Date" }
         position: { type: integer, minimum: 0, description: 0-based index in the stack after the move. }
         version: { type: integer, description: The view version the client last saw. }
 

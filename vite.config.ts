@@ -25,10 +25,17 @@ function devExamples(): Plugin {
 
 export default defineConfig({
   plugins: [devExamples()],
+  resolve: {
+    // Vite 8's native resolver (Rolldown) fails to follow real paths in some
+    // synced folders on Windows (this repo lives in Dropbox) and then can't
+    // find any npm package imported from source, such as react in the tests.
+    // Not following symlinks avoids that; the project uses no linked packages.
+    preserveSymlinks: true,
+  },
   server: { open: "/examples/index.html" },
   build: {
     lib: {
-      entry: "src/index.ts",
+      entry: "src/lib.ts",
       name: "timeline",
       formats: ["es", "umd"],
       fileName: (format) => (format === "es" ? "timelineview.mjs" : "timelineview.js"),

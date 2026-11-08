@@ -7,5 +7,5 @@
     "rootDir": "src"
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/global.ts"]
+  "exclude": ["src/**/*.test.ts", "src/global.ts", "src/lib.ts"]
 }

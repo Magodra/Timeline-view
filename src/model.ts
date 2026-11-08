@@ -1,8 +1,10 @@
 import { dateToData, parseDate } from "./dates";
 import { addDuration, isMilestoneDuration, parseDuration } from "./duration";
 import type {
+  AddEntryPlaceData,
   EntryData,
   MarkerData,
+  MarkerPatchData,
   TaskEntryData,
   Id,
   MilestoneSymbol,
@@ -12,7 +14,9 @@ import type {
   Placement,
   Scale,
   TaskData,
+  TaskPatchData,
   TimelineData,
+  TimelineUpdateData,
   TimelineViewData,
 } from "./types";
 
@@ -112,6 +116,20 @@ export const DEFAULT_CALLOUT_GAP = 16;
 
 const PLACEMENTS: readonly Placement[] = ["above", "on", "below"];
 const SCALES: readonly Scale[] = ["hour", "day", "week", "month", "year"];
+const SYMBOLS: readonly MilestoneSymbol[] = ["diamond", "circle", "square", "triangle", "star"];
+const SYMBOL_LIST = "use diamond, circle, square, triangle or star";
+const TIMELINE_PATCH_FIELDS: readonly (keyof TimelineUpdateData)[] = ["name", "start_date", "finish_date"];
+const MARKER_PATCH_FIELDS: readonly (keyof MarkerPatchData)[] = ["text", "date", "color", "global", "marker_offset"];
+
+/** Runs a data check, turning its error into a `MoveError` (`invalid`), as a REST 422. */
+function asInvalid<T>(check: () => T): T {
+  try {
+    return check();
+  } catch (error) {
+    throw new MoveError("invalid", error instanceof Error ? error.message : String(error));
+  }
+}
+const TASK_PATCH_FIELDS: readonly (keyof TaskPatchData)[] = ["text", "start_date", "duration", "finish_date", "symbol", "color"];
 
 const sameId = (a: Id, b: Id) => String(a) === String(b);
 const isLineIndex = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 0;
@@ -158,6 +176,9 @@ export class TimelineModel {
     }
     if (v.selection !== undefined && typeof v.selection !== "boolean") {
       throw new Error("view.selection must be true or false");
+    }
+    if (v.milestone_symbol !== undefined && !SYMBOLS.includes(v.milestone_symbol)) {
+      throw new Error(`Unknown view.milestone_symbol "${String(v.milestone_symbol)}": ${SYMBOL_LIST}`);
     }
 
     const view: View = {
@@ -273,6 +294,90 @@ export class TimelineModel {
     if (!isOffset(offset)) throw new MoveError("invalid", "marker_offset needs numeric x and y");
     marker.offset = { x: offset.x, y: offset.y === 0 ? 0 : offset.y };
     return marker;
+  }
+
+  /**
+   * Adds a marker, validated as in loaded data. A non-global marker shows on
+   * no timeline until `showMarker`. Throws a `MoveError` (`conflict` for an
+   * id in use, `invalid`) without changing anything.
+   */
+  addMarker(data: MarkerData): Marker {
+    if (data === null || typeof data !== "object") throw new MoveError("invalid", "A marker must be an object");
+    if (data.id !== undefined && data.id !== null && this.findMarker(data.id)) {
+      throw new MoveError("conflict", `Marker ${data.id} already exists`);
+    }
+    const marker = asInvalid(() => markerFromData(data));
+    this.markers.push(marker);
+    return marker;
+  }
+
+  /**
+   * Changes a marker: the fields in `patch` replace the marker's, `color:
+   * null` clears its color. Validated as in loaded data. Throws a
+   * `MoveError` (`not_found`, `invalid`) without changing anything. Returns
+   * the marker before and after.
+   */
+  updateMarker(id: Id, patch: MarkerPatchData): { marker: Marker; old: Marker } {
+    const index = this.markers.findIndex((mk) => sameId(mk.id, id));
+    if (index < 0) throw new MoveError("not_found", `Marker ${id} not found`);
+    if (patch === null || typeof patch !== "object" || Array.isArray(patch)) {
+      throw new MoveError("invalid", "A marker patch must be an object");
+    }
+    const unknown = Object.keys(patch).filter((k) => !MARKER_PATCH_FIELDS.includes(k as keyof MarkerPatchData));
+    if (unknown.length) throw new MoveError("invalid", `Unknown marker fields: ${unknown.join(", ")}`);
+    if (patch.text !== undefined && typeof patch.text !== "string") throw new MoveError("invalid", "text must be a string");
+    const old = this.markers[index];
+    const merged: Record<string, unknown> = { ...markerToData(old) };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null && key === "color") delete merged[key];
+      else if (value !== undefined) merged[key] = value;
+    }
+    const marker = asInvalid(() => markerFromData(merged as unknown as MarkerData));
+    this.markers[index] = marker;
+    return { marker, old };
+  }
+
+  /** Removes a marker, and its `{ marker }` entries. Returns it and the timelines that showed it by entry. */
+  removeMarker(id: Id): { marker: Marker; timelines: Timeline[] } {
+    const index = this.markers.findIndex((mk) => sameId(mk.id, id));
+    if (index < 0) throw new MoveError("not_found", `Marker ${id} not found`);
+    const [marker] = this.markers.splice(index, 1);
+    const timelines = this.timelines.filter((t) => t.markers.some((m) => sameId(m, marker.id)));
+    for (const t of timelines) t.markers = t.markers.filter((m) => !sameId(m, marker.id));
+    return { marker, timelines };
+  }
+
+  /**
+   * Shows a (non-global) marker on a timeline: adds its `{ marker }` entry.
+   * Returns the timeline, and whether anything changed (false if it already
+   * showed it). Throws a `MoveError` (`not_found`) for an unknown timeline or marker.
+   */
+  showMarker(timelineId: Id, markerId: Id): { timeline: Timeline; marker: Marker; changed: boolean } {
+    const timeline = this.findTimeline(timelineId);
+    if (!timeline) throw new MoveError("not_found", `Timeline ${timelineId} not found`);
+    const marker = this.findMarker(markerId);
+    if (!marker) throw new MoveError("not_found", `Marker ${markerId} not found`);
+    if (timeline.markers.some((m) => sameId(m, marker.id))) return { timeline, marker, changed: false };
+    timeline.markers.push(marker.id);
+    return { timeline, marker, changed: true };
+  }
+
+  /** Removes a marker's `{ marker }` entry from a timeline. Throws a `MoveError` (`not_found`) if it has none. */
+  hideMarker(timelineId: Id, markerId: Id): { timeline: Timeline; marker: Marker } {
+    const timeline = this.findTimeline(timelineId);
+    if (!timeline) throw new MoveError("not_found", `Timeline ${timelineId} not found`);
+    const index = timeline.markers.findIndex((m) => sameId(m, markerId));
+    if (index < 0) throw new MoveError("not_found", `Marker ${markerId} is not on timeline ${timelineId}`);
+    const [id] = timeline.markers.splice(index, 1);
+    return { timeline, marker: this.findMarker(id)! };
+  }
+
+  /** Replaces a marker with the server's copy (after a successful save), keeping its place. */
+  replaceMarker(data: MarkerData): void {
+    const index = this.markers.findIndex((mk) => sameId(mk.id, data.id));
+    const marker = markerFromData(data);
+    if (index >= 0) this.markers[index] = marker;
+    else this.markers.push(marker);
   }
 
   findMarker(id: Id): Marker | undefined {
@@ -431,11 +536,34 @@ export class TimelineModel {
 
   /** Sets a timeline's name. Returns the timeline and its old name. */
   renameTimeline(id: Id, name: string): { timeline: Timeline; old: string } {
+    const { timeline, old } = this.updateTimeline(id, { name });
+    return { timeline, old: old.name };
+  }
+
+  /**
+   * Changes a timeline's `name`, `start_date` and/or `finish_date` (only the
+   * fields given). The finish must stay after the start. Entries outside the
+   * new range stay; they are drawn at the edge, as in loaded data. Throws a
+   * `MoveError` (`not_found`, `invalid`) without changing anything. Returns
+   * the timeline and its fields before the change.
+   */
+  updateTimeline(id: Id, patch: TimelineUpdateData): { timeline: Timeline; old: Pick<Timeline, "name" | "start" | "finish"> } {
     const timeline = this.findTimeline(id);
     if (!timeline) throw new MoveError("not_found", `Timeline ${id} not found`);
-    if (typeof name !== "string") throw new MoveError("invalid", "name must be a string");
-    const old = timeline.name;
-    timeline.name = name;
+    if (patch === null || typeof patch !== "object" || Array.isArray(patch)) {
+      throw new MoveError("invalid", "A timeline patch must be an object");
+    }
+    const unknown = Object.keys(patch).filter((k) => !TIMELINE_PATCH_FIELDS.includes(k as keyof TimelineUpdateData));
+    if (unknown.length) throw new MoveError("invalid", `Unknown timeline fields: ${unknown.join(", ")}`);
+    if (patch.name !== undefined && typeof patch.name !== "string") throw new MoveError("invalid", "name must be a string");
+    const start = patch.start_date === undefined ? timeline.start : asInvalid(() => parseDate(patch.start_date!));
+    const finish = patch.finish_date === undefined ? timeline.finish : asInvalid(() => parseDate(patch.finish_date!));
+    if (finish <= start) throw new MoveError("invalid", `Timeline ${timeline.id}: finish_date must be after start_date`);
+
+    const old = { name: timeline.name, start: timeline.start, finish: timeline.finish };
+    if (patch.name !== undefined) timeline.name = patch.name;
+    timeline.start = start;
+    timeline.finish = finish;
     return { timeline, old };
   }
 
@@ -443,6 +571,68 @@ export class TimelineModel {
    * Removes a task and its entries on every timeline, then trims those
    * timelines' lines. Returns the task and the timelines it was on.
    */
+  /**
+   * Takes a task off one timeline, then trims that timeline's lines as after
+   * a move. The task itself stays, also when it is now on no timeline.
+   * Returns the removed entry and the timeline after the change.
+   */
+  removeEntry(timelineId: Id, taskId: Id): { entry: Entry; timeline: Timeline } {
+    const timeline = this.findTimeline(timelineId);
+    if (!timeline) throw new MoveError("not_found", `Timeline ${timelineId} not found`);
+    const index = timeline.entries.findIndex((e) => sameId(e.taskId, taskId));
+    if (index < 0) throw new MoveError("not_found", `Task ${taskId} is not on timeline ${timelineId}`);
+    const [entry] = timeline.entries.splice(index, 1);
+    trimLines(timeline);
+    return { entry, timeline };
+  }
+
+  /**
+   * Changes a task: the fields in `patch` (data format) replace the task's,
+   * and `null` clears an optional one (`duration`, `finish_date`, `symbol`,
+   * `color`). The finish is given one way: setting `duration` drops
+   * `finish_date` and the other way round, and clearing both makes a
+   * milestone. The result is validated as `parse()` would. Throws a
+   * `MoveError` (`not_found`, `invalid`) without changing anything. Returns
+   * the task before and after.
+   */
+  updateTask(id: Id, patch: TaskPatchData): { task: Task; old: Task } {
+    const index = this.tasks.findIndex((t) => sameId(t.id, id));
+    if (index < 0) throw new MoveError("not_found", `Task ${id} not found`);
+    if (patch === null || typeof patch !== "object" || Array.isArray(patch)) {
+      throw new MoveError("invalid", "A task patch must be an object");
+    }
+    const unknown = Object.keys(patch).filter((k) => !TASK_PATCH_FIELDS.includes(k as keyof TaskPatchData));
+    if (unknown.length) throw new MoveError("invalid", `Unknown task fields: ${unknown.join(", ")}`);
+    if (patch.text !== undefined && typeof patch.text !== "string") throw new MoveError("invalid", "text must be a string");
+    if (patch.start_date === null) throw new MoveError("invalid", "start_date can't be cleared");
+
+    const old = this.tasks[index];
+    const merged: Record<string, unknown> = { ...taskToData(old) };
+    // One way of giving the finish replaces the other.
+    if (patch.duration !== undefined) delete merged.finish_date;
+    if (patch.finish_date !== undefined) delete merged.duration;
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) delete merged[key];
+      else if (value !== undefined) merged[key] = value;
+    }
+    let task: Task;
+    try {
+      task = taskFromData(merged as unknown as TaskData);
+    } catch (error) {
+      throw new MoveError("invalid", error instanceof Error ? error.message : String(error));
+    }
+    this.tasks[index] = task;
+    return { task, old };
+  }
+
+  /** Replaces a task with the server's copy (after a successful save), keeping its place. */
+  replaceTask(data: TaskData): void {
+    const index = this.tasks.findIndex((t) => sameId(t.id, data.id));
+    const task = taskFromData(data);
+    if (index >= 0) this.tasks[index] = task;
+    else this.tasks.push(task);
+  }
+
   removeTask(id: Id): { task: Task; timelines: Timeline[] } {
     const index = this.tasks.findIndex((t) => sameId(t.id, id));
     if (index < 0) throw new MoveError("not_found", `Task ${id} not found`);
@@ -611,7 +801,7 @@ function markerFromData(mk: MarkerData): Marker {
   };
 }
 
-function markerToData(mk: Marker): MarkerData {
+export function markerToData(mk: Marker): MarkerData {
   return {
     id: mk.id,
     text: mk.text,
@@ -627,6 +817,9 @@ export function taskFromData(t: TaskData): Task {
   const start = parseDate(t.start_date);
   if (t.color !== undefined && (typeof t.color !== "string" || !isColor(t.color))) {
     throw new Error(`Task ${t.id}: color must be a CSS color`);
+  }
+  if (t.symbol !== undefined && !SYMBOLS.includes(t.symbol)) {
+    throw new Error(`Task ${t.id}: unknown symbol "${String(t.symbol)}": ${SYMBOL_LIST}`);
   }
   // The finish is given as finish_date, or derived from the duration; not both.
   let finish: Date;
@@ -663,24 +856,36 @@ export function taskToData(t: Task): TaskData {
   };
 }
 
+/** One task entry in the data format: `line` on the bar, or `callout_offset` for a callout. */
+export function entryToData(e: Entry): TaskEntryData {
+  return e.placement === "on" ? { task: e.taskId, line: e.line } : { task: e.taskId, callout_offset: { ...e.calloutOffset } };
+}
+
 export function timelineToData(t: Timeline): TimelineData {
   return {
     id: t.id,
     name: t.name,
     start_date: dateToData(t.start),
     finish_date: dateToData(t.finish),
-    entries: [
-      ...t.entries.map((e): EntryData =>
-        e.placement === "on"
-          ? { task: e.taskId, line: e.line }
-          : { task: e.taskId, callout_offset: { ...e.calloutOffset } },
-      ),
-      ...t.markers.map((marker): EntryData => ({ marker })),
-    ],
+    entries: [...t.entries.map(entryToData), ...t.markers.map((marker): EntryData => ({ marker }))],
   };
 }
 
 /** Converts a public move body to the internal form. */
+/**
+ * Converts where `addEntry` (or the REST add-entry body) puts a task, from
+ * the public format, for the timeline in the path.
+ */
+export function addTargetFromData(timelineId: Id, t: AddEntryPlaceData): AddTarget {
+  return {
+    timelineId,
+    ...(t.placement !== undefined && { placement: t.placement }),
+    ...(t.line !== undefined && { line: t.line }),
+    ...(t.new_line !== undefined && { newLine: t.new_line }),
+    ...(t.callout_offset !== undefined && { calloutOffset: t.callout_offset }),
+  };
+}
+
 export function patchFromData(p: MovePatchData): MovePatch {
   return {
     ...(p.timeline_id !== undefined && { timelineId: p.timeline_id }),

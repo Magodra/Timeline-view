@@ -279,13 +279,13 @@ describe("markers", () => {
     expect(runs("today")).toEqual(["1:bar-1:row", "2:row-2:row", "3:row-3:bar"]);
   });
 
-  it("moves a marker's label with setMarkerOffset, between the top and bottom end, and reports it", () => {
+  it("moves a marker's label with setMarkerOffset, between the top and bottom end, and reports it", async () => {
     const view = new TimelineView("tl");
     view.parse(data());
     const moved = vi.fn();
     view.on("marker_moved", moved);
 
-    view.setMarkerOffset("today", { x: 12, y: 30 });
+    await expect(view.setMarkerOffset("today", { x: 12, y: 30 })).resolves.toBe(true);
     expect(labelAt("today")).toBe("3/below");
     expect(moved).toHaveBeenCalledWith({ marker_id: "today", marker_offset: { x: 12, y: 30 } });
     expect(view.serialize().markers![0].marker_offset).toEqual({ x: 12, y: 30 });
@@ -294,7 +294,8 @@ describe("markers", () => {
     expect(label.style.marginTop).toBe("30px");
     // Draggable like a callout label.
     expect(label.hasAttribute("data-entry")).toBe(true);
-    expect(() => view.setMarkerOffset("nope", { x: 0, y: 0 })).toThrow(/not found/);
+    await expect(view.setMarkerOffset("nope", { x: 0, y: 0 })).rejects.toThrow(/not found/);
+    await expect(view.setMarkerOffset("today", { x: 12, y: 30 })).resolves.toBe(false); // unchanged
   });
 
   it("draws one straight line across every timeline with absolute: true", () => {
@@ -332,14 +333,14 @@ describe("moving timelines", () => {
     expect(container.querySelector(".tlv-timeline--selected")!.getAttribute("data-timeline")).toBe("2");
   });
 
-  it("fires timeline_moved for each move, but not when nothing moves", () => {
+  it("fires timeline_moved for each move, but not when nothing moves", async () => {
     const view = new TimelineView("tl");
     view.parse(three());
     const events: unknown[] = [];
     view.on("timeline_moved", (e) => events.push(e));
-    view.moveTimelineUp(2);
-    view.moveTimelineUp(2); // already at the top
-    view.moveTimeline(2, 2);
+    await view.moveTimelineUp(2);
+    await view.moveTimelineUp(2); // already at the top
+    await view.moveTimeline(2, 2);
     expect(events).toEqual([
       { timeline_id: 2, from_index: 1, to_index: 0, order: [2, 1, 3] },
       { timeline_id: 2, from_index: 0, to_index: 2, order: [1, 3, 2] },
@@ -398,6 +399,7 @@ describe("attachEvent", () => {
     const calls: unknown[][] = [];
     let self: unknown;
     view.attachEvent("onTaskClick", function (id, e, timelineId) {
+      // oxlint-disable-next-line typescript/no-this-alias -- the test checks what `this` is
       self = this;
       calls.push([id, e.type, timelineId]);
     });
@@ -657,6 +659,7 @@ describe("moveEntry with a REST backend", () => {
 });
 
 describe("adding entries from outside the view", () => {
+  // oxlint-disable-next-line typescript/unbound-method -- saved only to put it back on `document`
   const original = document.elementsFromPoint;
   afterEach(() => {
     document.elementsFromPoint = original;
@@ -717,14 +720,14 @@ describe("adding entries from outside the view", () => {
     expect(marked()).toHaveLength(0);
   });
 
-  it("adds an entry, renders it and fires entry_added", () => {
+  it("adds an entry, renders it and fires entry_added", async () => {
     const view = new TimelineView("tl");
     view.parse(sample());
     const events: unknown[] = [];
     view.on("entry_added", (e) => events.push(e));
     view.highlightTarget({ timeline_id: 1, placement: "above" });
 
-    view.addEntry({ id: 9, text: "New", start_date: "2026-04-20" }, { timeline_id: 1, placement: "above", callout_offset: { x: 4, y: -30 } });
+    await view.addEntry({ id: 9, text: "New", start_date: "2026-04-20" }, { timeline_id: 1, placement: "above", callout_offset: { x: 4, y: -30 } });
     expect(container.querySelector('.tlv-area--above .tlv-callout[data-task="9"]')).not.toBeNull();
     expect(container.querySelectorAll(".tlv-drop")).toHaveLength(0);
     expect(events).toEqual([
@@ -739,7 +742,7 @@ describe("adding entries from outside the view", () => {
     expect(view.serialize().tasks.map((t) => t.id)).toEqual([1, 2, 9]);
 
     // The same task again on the same timeline is refused.
-    expect(() => view.addEntry(9, { timeline_id: 1 })).toThrow(/already on timeline/);
+    await expect(view.addEntry(9, { timeline_id: 1 })).rejects.toThrow(/already on timeline/);
     expect(events).toHaveLength(1);
   });
 });
@@ -752,7 +755,7 @@ describe("removing tasks and timelines", () => {
     return data;
   };
 
-  it("removes a task from the tasks and every timeline, and fires task_removed", () => {
+  it("removes a task from the tasks and every timeline, and fires task_removed", async () => {
     const view = new TimelineView("tl");
     view.parse(two());
     view.selectTask(1);
@@ -761,7 +764,7 @@ describe("removing tasks and timelines", () => {
     const events: unknown[] = [];
     view.on("task_removed", (e) => events.push(e));
 
-    view.removeTask(1);
+    await view.removeTask(1);
     expect(container.querySelector('[data-task="1"]')).toBeNull();
     const data = view.serialize();
     expect(data.tasks.map((t) => t.id)).toEqual([2]);
@@ -777,21 +780,21 @@ describe("removing tasks and timelines", () => {
     ]);
   });
 
-  it("removes a timeline but keeps its tasks, and fires timeline_removed", () => {
+  it("removes a timeline but keeps its tasks, and fires timeline_removed", async () => {
     const view = new TimelineView("tl");
     view.parse(two());
     view.selectTimeline(1);
     const events: unknown[] = [];
     view.on("timeline_removed", (e) => events.push(e));
 
-    view.removeTimeline(1);
+    await view.removeTimeline(1);
     expect([...container.querySelectorAll<HTMLElement>(".tlv-timeline")].map((n) => n.dataset.timeline)).toEqual(["2"]);
     expect(view.serialize().tasks.map((t) => t.id)).toEqual([1, 2]);
     expect(view.getSelectedTimelines()).toEqual([]);
     expect(events).toEqual([{ timeline_id: 1, timeline: sample().timelines[0], index: 0, order: [2] }]);
 
     // The last one too: the view is then empty.
-    view.removeTimeline(2);
+    await view.removeTimeline(2);
     expect(container.querySelectorAll(".tlv-timeline")).toHaveLength(0);
     expect(events.at(-1)).toMatchObject({ timeline_id: 2, index: 0, order: [] });
   });
@@ -802,7 +805,7 @@ describe("removing tasks and timelines", () => {
     const handler = vi.fn();
     view.on("task_removed", handler);
     view.on("timeline_removed", handler);
-    expect(() => view.removeTask(9)).toThrow(/not found/);
+    await expect(view.removeTask(9)).rejects.toThrow(/not found/);
     await expect(view.removeTimeline(9)).rejects.toThrow(/not found/);
     expect(handler).not.toHaveBeenCalled();
   });
@@ -1027,8 +1030,8 @@ describe("timeline and view changes with a REST backend", () => {
     const fetch = vi.fn();
     const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
     view.parse(two());
-    view.renameView("Example"); // unchanged
-    view.moveTimelineUp(1); // already at the top
+    await view.renameView("Example"); // unchanged
+    await view.moveTimelineUp(1); // already at the top
     await expect(view.addTimeline({ id: 1, name: "Dup", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] })).rejects.toThrow(
       /already exists/,
     );
@@ -1038,16 +1041,16 @@ describe("timeline and view changes with a REST backend", () => {
 });
 
 describe("addTimeline", () => {
-  it("adds a timeline at the bottom or at a position, and fires timeline_added", () => {
+  it("adds a timeline at the bottom or at a position, and fires timeline_added", async () => {
     const view = new TimelineView("tl");
     view.parse(sample());
     const events: unknown[] = [];
     view.on("timeline_added", (e) => events.push(e));
 
-    view.addTimeline({ id: 2, name: "Two", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] });
+    await view.addTimeline({ id: 2, name: "Two", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] });
     // Entries may be left out; entries for known tasks are allowed.
-    view.addTimeline({ id: 3, name: "Three", start_date: "2026-04-01", finish_date: "2026-06-01" } as TimelineData, 0);
-    view.addTimeline({ id: 4, name: "Four", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [{ task: 1, line: 3 }] }, 1);
+    await view.addTimeline({ id: 3, name: "Three", start_date: "2026-04-01", finish_date: "2026-06-01" } as TimelineData, 0);
+    await view.addTimeline({ id: 4, name: "Four", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [{ task: 1, line: 3 }] }, 1);
 
     expect([...container.querySelectorAll<HTMLElement>(".tlv-timeline")].map((n) => n.dataset.timeline)).toEqual(["3", "4", "1", "2"]);
     expect(view.serialize().timelines[1].entries).toEqual([{ task: 1, line: 0 }]); // trimmed
@@ -1069,5 +1072,306 @@ describe("addTimeline", () => {
     await expect(view.addTimeline({ ...ok, entries: [{ task: 99 }] })).rejects.toThrow(/unknown task/);
     await expect(view.addTimeline(ok, 5)).rejects.toThrow(/position/);
     expect(view.serialize()).toEqual(before);
+  });
+});
+
+describe("adding and removing entries with a REST backend", () => {
+  const requests = (fetch: ReturnType<typeof vi.fn>) =>
+    (fetch.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [
+      init.method,
+      url.replace("https://api.test", ""),
+      init.body === undefined ? undefined : JSON.parse(init.body as string),
+    ]);
+  const two = (): TimelineViewData => {
+    const data = sample();
+    data.timelines.push({ id: 2, name: "Two", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] });
+    return data;
+  };
+
+  it("sends a new task's data the first time and its id after that, and takes the server's timeline", async () => {
+    let version = 7;
+    // The server answers with its own copy of the timeline in the path.
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const id = Number(/timelines\/(\d+)\//.exec(url)![1]);
+      const timeline = { ...two().timelines[id - 1], name: `From server ${id}` };
+      return json(200, { version: ++version, timelines: [timeline] });
+    });
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(two());
+
+    const task = { id: 9, text: "New", start_date: "2026-04-20" };
+    await view.addEntry(task, { timeline_id: 1, placement: "below", callout_offset: { x: 5, y: 20 } });
+    await view.addEntry(9, { timeline_id: 2 });
+
+    expect(requests(fetch)).toEqual([
+      ["POST", "/views/v1/timelines/1/entries", { task, placement: "below", callout_offset: { x: 5, y: 20 }, version: 7 }],
+      ["POST", "/views/v1/timelines/2/entries", { task: 9, version: 8 }],
+    ]);
+    expect(view.serialize().version).toBe(9);
+    // The last response replaced the local timeline.
+    expect(view.serialize().timelines[1].name).toBe("From server 2");
+  });
+
+  it("removes an entry, fires entry_removed, and sends a DELETE", async () => {
+    const fetch = vi.fn(async () => json(200, { version: 8, timelines: [{ ...sample().timelines[0], entries: [{ task: 2, callout_offset: { x: 30, y: 16 } }] }] }));
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(sample());
+    const events: unknown[] = [];
+    view.on("entry_removed", (e) => events.push(e));
+
+    const removal = view.removeEntry(1, 1);
+    expect(container.querySelector('[data-task="1"]')).toBeNull(); // gone at once
+    await removal;
+
+    expect(requests(fetch)).toEqual([["DELETE", "/views/v1/timelines/1/entries/1?version=7", undefined]]);
+    expect(events).toEqual([
+      {
+        timeline_id: 1,
+        task_id: 1,
+        entry: { task: 1, line: 1 },
+        timeline: { ...sample().timelines[0], entries: [{ task: 2, callout_offset: { x: 30, y: 16 } }] },
+      },
+    ]);
+    expect(view.serialize().tasks.map((t) => t.id)).toEqual([1, 2]); // the task stays
+  });
+
+  it("rolls back a rejected add or removal, and fires save_failed with the task", async () => {
+    const fetch = vi.fn(async () => json(500, { error: "down" }));
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(two());
+    const before = view.serialize();
+    const failed = vi.fn();
+    view.on("save_failed", failed);
+
+    await expect(view.addEntry({ id: 9, text: "New", start_date: "2026-04-20" }, { timeline_id: 2 })).rejects.toMatchObject({ status: 500 });
+    await expect(view.removeEntry(1, 2)).rejects.toMatchObject({ status: 500 });
+
+    expect(view.serialize()).toEqual(before);
+    expect(failed.mock.calls.map(([e]) => [e.action, e.timeline_id, e.task_id])).toEqual([
+      ["add_entry", 2, 9],
+      ["remove_entry", 1, 2],
+    ]);
+  });
+
+  it("rejects removing a task that isn't on the timeline, without sending anything", async () => {
+    const fetch = vi.fn();
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(two());
+    await expect(view.removeEntry(2, 1)).rejects.toThrow(/not on timeline/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("updating and removing tasks", () => {
+  it("updates a task wherever it appears, and fires task_updated", async () => {
+    const data = sample();
+    data.timelines.push({ id: 2, name: "Two", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [{ task: 1, line: 0 }] });
+    const view = new TimelineView("tl");
+    view.parse(data);
+    const events: unknown[] = [];
+    view.on("task_updated", (e) => events.push(e));
+
+    await expect(view.updateTask(1, { text: "Build", duration: "1w" })).resolves.toBe(true);
+    expect([...container.querySelectorAll('.tlv-task[data-task="1"]')].map((n) => n.textContent)).toEqual(["Build", "Build"]);
+    expect(events).toEqual([
+      {
+        task_id: 1,
+        task: { id: 1, text: "Build", start_date: "2026-04-01", duration: "1w" },
+        old_task: { id: 1, text: "Task #1", start_date: "2026-04-01", duration: "2d" },
+      },
+    ]);
+    // Nothing changes: false, no event.
+    await expect(view.updateTask(1, { text: "Build" })).resolves.toBe(false);
+    expect(events).toHaveLength(1);
+    await expect(view.updateTask(1, { duration: "2d", finish_date: "2026-04-05" })).rejects.toThrow(/not both/);
+  });
+
+  it("saves updates and removals, taking the server's copy of the task", async () => {
+    let version = 7;
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        return json(200, { version: ++version, task: { id: 2, text: "Server's name", start_date: "2026-04-11" } });
+      }
+      return json(200, { version: ++version, timelines: [{ ...sample().timelines[0], entries: [{ task: 1, line: 0 }] }] });
+    });
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(sample());
+    view.selectTask(2);
+
+    await view.updateTask(2, { text: "Sign-off", start_date: "2026-04-11" });
+    expect(view.serialize().tasks[1]).toEqual({ id: 2, text: "Server's name", start_date: "2026-04-11" });
+    await view.removeTask(2);
+
+    const calls = (fetch.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [
+      init.method,
+      url.replace("https://api.test", ""),
+      init.body === undefined ? undefined : JSON.parse(init.body as string),
+    ]);
+    expect(calls).toEqual([
+      ["PATCH", "/views/v1/tasks/2", { text: "Sign-off", start_date: "2026-04-11", version: 7 }],
+      ["DELETE", "/views/v1/tasks/2?version=8", undefined],
+    ]);
+    expect(view.serialize().version).toBe(9);
+    expect(view.serialize().tasks.map((t) => t.id)).toEqual([1]);
+    expect(view.getSelectedTasks()).toEqual([]);
+  });
+
+  it("rolls back a rejected update or removal, and fires save_failed", async () => {
+    const fetch = vi.fn(async () => json(500, { error: "down" }));
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(sample());
+    const before = view.serialize();
+    const failed = vi.fn();
+    view.on("save_failed", failed);
+
+    const update = view.updateTask(1, { text: "Changed" });
+    expect(container.querySelector('.tlv-task[data-task="1"]')!.textContent).toBe("Changed"); // shown at once
+    await expect(update).rejects.toMatchObject({ status: 500 });
+    await expect(view.removeTask(2)).rejects.toMatchObject({ status: 500 });
+
+    expect(view.serialize()).toEqual(before);
+    expect(failed.mock.calls.map(([e]) => [e.action, e.task_id])).toEqual([
+      ["update_task", 1],
+      ["remove_task", 2],
+    ]);
+  });
+});
+
+describe("editing markers", () => {
+  const data = (): TimelineViewData => {
+    const d = sample();
+    d.timelines.push({ id: 2, name: "Two", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] });
+    d.markers = [{ id: "m", text: "Kick-off", date: "2026-03-10", marker_offset: { x: 0, y: -16 } }];
+    d.timelines[0].entries.push({ marker: "m" });
+    return d;
+  };
+  const labels = () => [...container.querySelectorAll<HTMLElement>(".tlv-marker-label")].map((n) => n.textContent);
+
+  it("adds, updates, shows, hides and removes markers, with events", async () => {
+    const view = new TimelineView("tl");
+    view.parse(data());
+    const events: [string, unknown][] = [];
+    const names = ["marker_added", "marker_updated", "marker_moved", "marker_removed", "marker_shown", "marker_hidden"] as const;
+    for (const name of names) view.on(name, (e) => events.push([name, e]));
+
+    await view.addMarker({ id: "g", text: "Today", date: "2026-04-01", global: true });
+    expect(labels()).toContain("Today2026-04-01");
+    await expect(view.updateMarker("m", { text: "Start", marker_offset: { x: 4, y: 20 } })).resolves.toBe(true);
+    expect(labels()).toContain("Start2026-03-10");
+    await expect(view.updateMarker("m", { text: "Start" })).resolves.toBe(false);
+    await expect(view.showMarker(2, "m")).resolves.toBe(true);
+    await view.hideMarker(2, "m");
+    await view.removeMarker("g");
+    expect(labels()).not.toContain("Today2026-04-01");
+
+    expect(events.map(([name]) => name)).toEqual([
+      "marker_added",
+      "marker_updated",
+      "marker_moved",
+      "marker_shown",
+      "marker_hidden",
+      "marker_removed",
+    ]);
+    expect(events[1][1]).toMatchObject({ marker_id: "m", marker: { text: "Start" }, old_marker: { text: "Kick-off" } });
+    expect(events[2][1]).toEqual({ marker_id: "m", marker_offset: { x: 4, y: 20 } });
+    await expect(view.hideMarker(2, "m")).rejects.toThrow(/not on timeline/);
+  });
+
+  it("saves every marker change, including a moved label", async () => {
+    let version = 7;
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const marker = { id: "m", text: "From server", date: "2026-03-10", marker_offset: { x: 0, y: -16 } };
+      if (init?.method === "PATCH" || init?.method === "POST") return json(200, { version: ++version, marker });
+      return json(200, { version: ++version, timelines: [] });
+    });
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(data());
+
+    await view.addMarker({ id: "g", text: "Today", date: "2026-04-01", global: true });
+    await view.updateMarker("m", { color: "green" });
+    await view.setMarkerOffset("m", { x: 3, y: 30 });
+    await view.showMarker(2, "m");
+    await view.hideMarker(2, "m");
+    await view.removeMarker("g");
+
+    const calls = (fetch.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [
+      init.method,
+      url.replace("https://api.test", ""),
+      init.body === undefined ? undefined : JSON.parse(init.body as string),
+    ]);
+    const added = { id: "g", text: "Today", date: "2026-04-01", global: true, marker_offset: { x: 0, y: -16 } };
+    expect(calls).toEqual([
+      ["POST", "/views/v1/markers", { marker: added, version: 7 }],
+      ["PATCH", "/views/v1/markers/m", { color: "green", version: 8 }],
+      ["PATCH", "/views/v1/markers/m", { marker_offset: { x: 3, y: 30 }, version: 9 }],
+      ["PUT", "/views/v1/timelines/2/markers/m", { version: 10 }],
+      ["DELETE", "/views/v1/timelines/2/markers/m?version=11", undefined],
+      ["DELETE", "/views/v1/markers/g?version=12", undefined],
+    ]);
+    // The server's copy of the marker replaced the local one.
+    expect(view.serialize().markers!.find((m) => m.id === "m")!.text).toBe("From server");
+  });
+
+  it("rolls back a rejected marker change and fires save_failed", async () => {
+    const fetch = vi.fn(async () => json(500, { error: "down" }));
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(data());
+    const before = view.serialize();
+    const failed = vi.fn();
+    view.on("save_failed", failed);
+
+    await expect(view.setMarkerOffset("m", { x: 9, y: 40 })).rejects.toMatchObject({ status: 500 });
+    await expect(view.showMarker(2, "m")).rejects.toMatchObject({ status: 500 });
+    expect(view.serialize()).toEqual(before);
+    expect(failed.mock.calls.map(([e]) => [e.action, e.marker_id, e.timeline_id])).toEqual([
+      ["update_marker", "m", undefined],
+      ["show_marker", "m", 2],
+    ]);
+  });
+});
+
+describe("updateTimeline", () => {
+  it("changes a timeline's dates, redraws it and fires timeline_updated", async () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const updated = vi.fn();
+    const renamed = vi.fn();
+    view.on("timeline_updated", updated);
+    view.on("timeline_renamed", renamed);
+
+    await expect(view.updateTimeline(1, { finish_date: "2026-06-01" })).resolves.toBe(true);
+    expect(container.querySelector(".tlv-date--finish .tlv-date-value")!.textContent).toBe("2026-06-01");
+    expect(updated).toHaveBeenCalledWith({
+      timeline_id: 1,
+      timeline: { ...sample().timelines[0], finish_date: "2026-06-01" },
+      old_timeline: sample().timelines[0],
+    });
+    expect(renamed).not.toHaveBeenCalled();
+
+    await expect(view.updateTimeline(1, { name: "Main", finish_date: "2026-06-01" })).resolves.toBe(true);
+    expect(renamed).toHaveBeenCalledWith({ timeline_id: 1, name: "Main", old_name: "Project" });
+    await expect(view.updateTimeline(1, { name: "Main" })).resolves.toBe(false); // unchanged
+    await expect(view.updateTimeline(1, { start_date: "2026-07-01" })).rejects.toThrow(/after start_date/);
+    expect(view.serialize().timelines[0].start_date).toBe("2026-03-01");
+  });
+
+  it("saves date changes with the timeline PATCH, and rolls back a rejected one", async () => {
+    let fail = false;
+    const fetch = vi.fn(async () => (fail ? json(500, {}) : json(200, { version: 8, order: [1] })));
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(sample());
+    const failed = vi.fn();
+    view.on("save_failed", failed);
+
+    await view.updateTimeline(1, { start_date: "2026-02-01", finish_date: "2026-07-01" });
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect([init.method, url]).toEqual(["PATCH", "https://api.test/views/v1/timelines/1"]);
+    expect(JSON.parse(init.body as string)).toEqual({ start_date: "2026-02-01", finish_date: "2026-07-01", version: 7 });
+
+    fail = true;
+    await expect(view.updateTimeline(1, { finish_date: "2026-09-01" })).rejects.toMatchObject({ status: 500 });
+    expect(view.serialize().timelines[0].finish_date).toBe("2026-07-01");
+    expect(failed.mock.calls[0][0]).toMatchObject({ action: "update_timeline", timeline_id: 1 });
   });
 });

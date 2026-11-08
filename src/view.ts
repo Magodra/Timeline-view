@@ -1,16 +1,34 @@
 import { ApiError, RestClient } from "./api";
 import { attachDrag, calloutOffset, hitTarget, targetElement, type DropEvent, type DropTarget, type MarkerDropEvent } from "./drag";
-import { patchFromData, taskFromData, taskToData, TimelineModel, timelineToData, type Task } from "./model";
+import {
+  addTargetFromData,
+  entryToData,
+  markerToData,
+  patchFromData,
+  taskFromData,
+  taskToData,
+  TimelineModel,
+  timelineToData,
+  type Task,
+} from "./model";
+import { dateToData } from "./dates";
 import { attachAt, layout, render, unwatchLayout } from "./render";
 import { toSVG } from "./svg";
 import type {
+  AddEntryData,
   EntryTargetData,
   Id,
+  MarkerData,
+  MarkerPatchData,
   MovePatchData,
+  MarkerResultData,
+  MoveResultData,
   Offset,
   TaskData,
   TaskEntryData,
+  TaskPatchData,
   TimelineData,
+  TimelineUpdateData,
   TimelineViewData,
 } from "./types";
 
@@ -34,6 +52,36 @@ export interface MoveFailedEvent extends EntryMovedEvent {
 export interface MarkerMovedEvent {
   marker_id: Id;
   marker_offset: Offset;
+}
+
+export interface MarkerAddedEvent {
+  marker_id: Id;
+  /** The added marker, in the data format. */
+  marker: MarkerData;
+}
+
+export interface MarkerUpdatedEvent {
+  marker_id: Id;
+  /** The marker after the change, in the data format. */
+  marker: MarkerData;
+  /** The marker before it. */
+  old_marker: MarkerData;
+}
+
+export interface MarkerRemovedEvent {
+  marker_id: Id;
+  /** The removed marker, in the data format. */
+  marker: MarkerData;
+  /** The timelines that had a `{ marker }` entry for it, after the removal. */
+  timelines: TimelineData[];
+}
+
+/** `marker_shown` and `marker_hidden`: a marker's `{ marker }` entry was added to or removed from a timeline. */
+export interface MarkerVisibilityEvent {
+  timeline_id: Id;
+  marker_id: Id;
+  /** The timeline after the change. */
+  timeline: TimelineData;
 }
 
 export interface EntryAddedEvent {
@@ -98,10 +146,39 @@ export interface TimelineAddedEvent {
   order: Id[];
 }
 
+export interface TaskUpdatedEvent {
+  task_id: Id;
+  /** The task after the change, in the data format. */
+  task: TaskData;
+  /** The task before it. */
+  old_task: TaskData;
+}
+
+export interface EntryRemovedEvent {
+  timeline_id: Id;
+  task_id: Id;
+  /** The removed entry, in the data format. */
+  entry: TaskEntryData;
+  /** The timeline after the removal, with all its entries (lines may be renumbered). */
+  timeline: TimelineData;
+}
+
+export interface TimelineUpdatedEvent {
+  timeline_id: Id;
+  /** The timeline after the change, in the data format. */
+  timeline: TimelineData;
+  /** The timeline before it (same entries). */
+  old_timeline: TimelineData;
+}
+
 export interface SaveFailedEvent {
   action: SaveAction;
   /** The timeline the change was for; not set for `rename_view`. */
   timeline_id?: Id;
+  /** The task, for `add_entry`, `remove_entry`, `update_task` and `remove_task`. */
+  task_id?: Id;
+  /** The marker, for the marker actions. */
+  marker_id?: Id;
   /** An `ApiError` (with `status` and `body`) for a rejected request, or the network error. */
   error: unknown;
 }
@@ -112,42 +189,74 @@ export interface TimelineEvents {
   /** A move was rejected, locally or by the server. The view shows the restored state. */
   move_failed: MoveFailedEvent;
   /**
-   * A marker's label was moved (dragged, or `setMarkerOffset`). Markers have
-   * no REST call yet, so saving the new `marker_offset` is up to the host.
+   * A marker's label was moved: dragged, `setMarkerOffset`, or an
+   * `updateMarker` with a new `marker_offset` (which also fires
+   * `marker_updated`). With a REST backend it is saved too.
    */
   marker_moved: MarkerMovedEvent;
+  /** A marker was added with `addMarker`. */
+  marker_added: MarkerAddedEvent;
+  /** A marker was changed with `updateMarker` (or its label moved). */
+  marker_updated: MarkerUpdatedEvent;
+  /** A marker was removed with `removeMarker`. */
+  marker_removed: MarkerRemovedEvent;
+  /** A marker was shown on a timeline with `showMarker`. */
+  marker_shown: MarkerVisibilityEvent;
+  /** A marker was taken off a timeline with `hideMarker`. */
+  marker_hidden: MarkerVisibilityEvent;
   /**
    * An entry was added with `addEntry` (for example a task dropped from a
-   * list outside the view). There is no REST call for it yet, so saving it is
-   * up to the host.
+   * list outside the view). With a REST backend it is saved too.
    */
   entry_added: EntryAddedEvent;
+  /** A task was taken off a timeline with `removeEntry`. With a REST backend it is saved too. */
+  entry_removed: EntryRemovedEvent;
   /**
    * A timeline was moved in the stack (`moveTimeline`, `moveTimelineUp`,
    * `moveTimelineDown`). With a REST backend the new position is saved too.
    */
   timeline_moved: TimelineMovedEvent;
-  /** A task was removed with `removeTask`. No REST call yet: saving it is up to the host. */
+  /** A task was removed with `removeTask`. With a REST backend it is saved too. */
   task_removed: TaskRemovedEvent;
+  /** A task's fields were changed with `updateTask`. With a REST backend it is saved too. */
+  task_updated: TaskUpdatedEvent;
   /** A timeline was removed with `removeTimeline`. With a REST backend it is saved too. */
   timeline_removed: TimelineRemovedEvent;
   /** The view's name was changed with `renameView`. With a REST backend it is saved too. */
   view_renamed: ViewRenamedEvent;
-  /** A timeline's name was changed with `renameTimeline`. With a REST backend it is saved too. */
+  /** A timeline's name, start or finish was changed with `updateTimeline` (or `renameTimeline`). */
+  timeline_updated: TimelineUpdatedEvent;
+  /** A timeline's name was changed with `renameTimeline` (or `updateTimeline`). With a REST backend it is saved too. */
   timeline_renamed: TimelineRenamedEvent;
   /** A timeline was added with `addTimeline`. */
   timeline_added: TimelineAddedEvent;
   /**
-   * Saving a view or timeline change (rename, add, move, remove) to the REST
-   * backend failed. The view already shows the restored state: rolled back,
-   * or the server's current view after a 409. Entry moves report
-   * `move_failed` instead.
+   * Saving a change to the REST backend failed: a view or timeline change
+   * (rename, add, move, remove), an entry add or removal, a task update or
+   * removal, or a marker change (including a moved label). The view already
+   * shows the restored state: rolled back, or the server's current view
+   * after a 409. Entry moves report `move_failed` instead.
    */
   save_failed: SaveFailedEvent;
 }
 
 /** What a failed save was for. */
-export type SaveAction = "rename_view" | "add_timeline" | "rename_timeline" | "move_timeline" | "remove_timeline";
+export type SaveAction =
+  | "rename_view"
+  | "add_timeline"
+  | "rename_timeline"
+  | "update_timeline"
+  | "move_timeline"
+  | "remove_timeline"
+  | "add_entry"
+  | "remove_entry"
+  | "update_task"
+  | "remove_task"
+  | "add_marker"
+  | "update_marker"
+  | "remove_marker"
+  | "show_marker"
+  | "hide_marker";
 
 type Handler<T> = (event: T) => void;
 
@@ -220,7 +329,9 @@ export class TimelineView {
 
   constructor(container: string | HTMLElement, options: TimelineOptions = {}) {
     const node = typeof container === "string" ? document.getElementById(container) : container;
-    if (!node) throw new Error(`Timeline container "${container}" not found`);
+    if (!node) {
+      throw new Error(typeof container === "string" ? `Timeline container "${container}" not found` : "Timeline container is missing");
+    }
     this.container = node;
     if (options.api_url) this.api = new RestClient(options.api_url, options.fetch);
     this.detachDrag = attachDrag(
@@ -272,8 +383,8 @@ export class TimelineView {
   on<K extends keyof TimelineEvents>(name: K, handler: Handler<TimelineEvents[K]>): () => void {
     let set = this.listeners.get(name);
     if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(handler as Handler<never>);
-    return () => set.delete(handler as Handler<never>);
+    set.add(handler);
+    return () => set.delete(handler);
   }
 
   /**
@@ -340,12 +451,139 @@ export class TimelineView {
 
   /**
    * Moves a marker's label, as dragging it does: `y ≤ 0` above the topmost
-   * bar showing the marker, `y > 0` below the bottommost. Fires `marker_moved`.
+   * bar showing the marker, `y > 0` below the bottommost. The same as
+   * `updateMarker(id, { marker_offset })`: fires `marker_moved` and
+   * `marker_updated`, and is saved the same way.
    */
-  setMarkerOffset(markerId: Id, offset: Offset): void {
-    const marker = this.requireModel().setMarkerOffset(markerId, offset);
+  setMarkerOffset(markerId: Id, offset: Offset): Promise<boolean> {
+    return this.updateMarker(markerId, { marker_offset: offset });
+  }
+
+  /**
+   * Adds a marker, in the data format (`{ id, text, date, color?, global?,
+   * marker_offset? }`), validated as in loaded data. A global marker shows on
+   * every timeline; any other on none until `showMarker`. Fires
+   * `marker_added`. Like the other changes it returns a promise, which
+   * rejects with a `MoveError` (`conflict` for an id in use, `invalid`)
+   * without changing anything, and after a failed save. With a REST backend,
+   * saved with `POST /views/{view_id}/markers`.
+   */
+  async addMarker(data: MarkerData): Promise<void> {
+    const model = this.requireModel();
+    const snapshot = model.toData();
+    const marker = model.addMarker(data);
     this.render();
-    this.emit("marker_moved", { marker_id: marker.id, marker_offset: { ...marker.offset } });
+    const added = markerToData(marker);
+    this.emit("marker_added", { marker_id: marker.id, marker: added });
+    await this.saveChange(
+      snapshot,
+      "add_marker",
+      { marker_id: marker.id },
+      (api, viewId, version) => api.addMarker(viewId, added, version),
+      this.takeMarker,
+    );
+  }
+
+  /**
+   * Changes a marker's `text`, `date`, `color` (`null` for the theme's),
+   * `global` or `marker_offset`. Send only what changes; the result is
+   * validated as in loaded data. Fires `marker_updated` with the marker
+   * before and after, and `marker_moved` too when the label moved. Resolves
+   * to false, without events, if nothing changes; rejects with a `MoveError`
+   * (`not_found`, `invalid`) without changing anything, and after a failed
+   * save. With a REST backend, saved with
+   * `PATCH /views/{view_id}/markers/{marker_id}`.
+   */
+  async updateMarker(id: Id, patch: MarkerPatchData): Promise<boolean> {
+    const model = this.requireModel();
+    const snapshot = model.toData();
+    const { marker, old } = model.updateMarker(id, patch);
+    const before = markerToData(old);
+    const after = markerToData(marker);
+    if (JSON.stringify(before) === JSON.stringify(after)) return false;
+    this.render();
+    this.emit("marker_updated", { marker_id: marker.id, marker: after, old_marker: before });
+    if (marker.offset.x !== old.offset.x || marker.offset.y !== old.offset.y) {
+      this.emit("marker_moved", { marker_id: marker.id, marker_offset: { ...marker.offset } });
+    }
+    await this.saveChange(
+      snapshot,
+      "update_marker",
+      { marker_id: marker.id },
+      (api, viewId, version) => api.updateMarker(viewId, marker.id, patch, version),
+      this.takeMarker,
+    );
+    return true;
+  }
+
+  /**
+   * Removes a marker, from the view and from every timeline that shows it.
+   * Fires `marker_removed`. Returns a promise like the other changes; it
+   * rejects with a `MoveError` (`not_found`) for an unknown id. With a REST
+   * backend, saved with `DELETE /views/{view_id}/markers/{marker_id}`.
+   */
+  async removeMarker(id: Id): Promise<void> {
+    const model = this.requireModel();
+    const snapshot = model.toData();
+    const { marker, timelines } = model.removeMarker(id);
+    this.render();
+    this.emit("marker_removed", {
+      marker_id: marker.id,
+      marker: markerToData(marker),
+      timelines: timelines.map(timelineToData),
+    });
+    await this.saveChange(
+      snapshot,
+      "remove_marker",
+      { marker_id: marker.id },
+      (api, viewId, version) => api.removeMarker(viewId, marker.id, version),
+      this.takeTimelines,
+    );
+  }
+
+  /**
+   * Shows a marker on a timeline (adds its `{ marker }` entry), for a marker
+   * that isn't `global`. Fires `marker_shown`. Resolves to false, without
+   * the event, if the timeline already shows it; rejects with a `MoveError`
+   * (`not_found`) for an unknown timeline or marker. With a REST backend,
+   * saved with `PUT /views/{view_id}/timelines/{timeline_id}/markers/{marker_id}`.
+   */
+  async showMarker(timelineId: Id, markerId: Id): Promise<boolean> {
+    const model = this.requireModel();
+    const snapshot = model.toData();
+    const { timeline, marker, changed } = model.showMarker(timelineId, markerId);
+    if (!changed) return false;
+    this.render();
+    this.emit("marker_shown", { timeline_id: timeline.id, marker_id: marker.id, timeline: timelineToData(timeline) });
+    await this.saveChange(
+      snapshot,
+      "show_marker",
+      { timeline_id: timeline.id, marker_id: marker.id },
+      (api, viewId, version) => api.showMarker(viewId, timeline.id, marker.id, version),
+      this.takeTimelines,
+    );
+    return true;
+  }
+
+  /**
+   * Stops showing a marker on a timeline (removes its `{ marker }` entry).
+   * Fires `marker_hidden`. Rejects with a `MoveError` (`not_found`) if the
+   * timeline has no entry for it. With a REST backend, saved with
+   * `DELETE /views/{view_id}/timelines/{timeline_id}/markers/{marker_id}`.
+   */
+  async hideMarker(timelineId: Id, markerId: Id): Promise<void> {
+    const model = this.requireModel();
+    const snapshot = model.toData();
+    const { timeline, marker } = model.hideMarker(timelineId, markerId);
+    this.render();
+    this.emit("marker_hidden", { timeline_id: timeline.id, marker_id: marker.id, timeline: timelineToData(timeline) });
+    await this.saveChange(
+      snapshot,
+      "hide_marker",
+      { timeline_id: timeline.id, marker_id: marker.id },
+      (api, viewId, version) => api.hideMarker(viewId, timeline.id, marker.id, version),
+      this.takeTimelines,
+    );
   }
 
   /*
@@ -370,29 +608,47 @@ export class TimelineView {
     const old = model.renameView(name);
     this.render();
     this.emit("view_renamed", { name, old_name: old });
-    await this.saveChange(snapshot, "rename_view", undefined, (api, viewId, version) =>
+    await this.saveChange(snapshot, "rename_view", {}, (api, viewId, version) =>
       api.updateView(viewId, { name }, version),
     );
     return true;
   }
 
   /**
-   * Sets a timeline's name and fires `timeline_renamed`. Resolves to false,
-   * without the event, if the name is unchanged. Rejects with a `MoveError`
-   * (`not_found` or `invalid`) for an unknown id or a `name` that isn't a
-   * string. With a REST backend, saves it with
-   * `PATCH /views/{view_id}/timelines/{timeline_id}`.
+   * Sets a timeline's name: the same as `updateTimeline(id, { name })`.
+   * Fires `timeline_renamed` (and `timeline_updated`).
    */
-  async renameTimeline(id: Id, name: string): Promise<boolean> {
+  renameTimeline(id: Id, name: string): Promise<boolean> {
+    return this.updateTimeline(id, { name });
+  }
+
+  /**
+   * Changes a timeline's `name`, `start_date` and/or `finish_date`; send only
+   * what changes. The finish must stay after the start. Entries outside the
+   * new range stay, drawn at the edge with an arrow, as in loaded data.
+   * Fires `timeline_updated` with the timeline before and after, and
+   * `timeline_renamed` too when the name changed. Resolves to false, without
+   * events, if nothing changes; rejects with a `MoveError` (`not_found`,
+   * `invalid`) without changing anything, and after a failed save. With a
+   * REST backend, saved with `PATCH /views/{view_id}/timelines/{timeline_id}`.
+   */
+  async updateTimeline(id: Id, patch: TimelineUpdateData): Promise<boolean> {
     const model = this.requireModel();
-    const current = model.findTimeline(id);
-    if (current && current.name === name) return false;
     const snapshot = model.toData();
-    const { timeline, old } = model.renameTimeline(id, name);
+    const before = model.findTimeline(id);
+    const beforeData = before && timelineToData(before);
+    const { timeline, old } = model.updateTimeline(id, patch);
+    const after = timelineToData(timeline);
+    if (JSON.stringify(beforeData) === JSON.stringify(after)) return false;
     this.render();
-    this.emit("timeline_renamed", { timeline_id: timeline.id, name, old_name: old });
-    await this.saveChange(snapshot, "rename_timeline", timeline.id, (api, viewId, version) =>
-      api.updateTimeline(viewId, timeline.id, { name }, version),
+    const oldTimeline = { ...after, name: old.name, start_date: dateToData(old.start), finish_date: dateToData(old.finish) };
+    this.emit("timeline_updated", { timeline_id: timeline.id, timeline: after, old_timeline: oldTimeline });
+    if (timeline.name !== old.name) {
+      this.emit("timeline_renamed", { timeline_id: timeline.id, name: timeline.name, old_name: old.name });
+    }
+    const onlyName = Object.keys(patch).every((k) => k === "name");
+    await this.saveChange(snapshot, onlyName ? "rename_timeline" : "update_timeline", { timeline_id: timeline.id }, (api, viewId, version) =>
+      api.updateTimeline(viewId, timeline.id, patch, version),
     );
     return true;
   }
@@ -419,19 +675,57 @@ export class TimelineView {
       index: at,
       order: model.timelines.map((t) => t.id),
     });
-    await this.saveChange(snapshot, "add_timeline", timeline.id, (api, viewId, version) =>
+    await this.saveChange(snapshot, "add_timeline", { timeline_id: timeline.id }, (api, viewId, version) =>
       api.addTimeline(viewId, added, at, version),
     );
   }
 
   /**
+   * Changes a task's fields (`text`, `start_date`, `duration` or
+   * `finish_date`, `symbol`, `color`), wherever it appears, and fires
+   * `task_updated`. Send only what changes; `null` clears an optional field.
+   * Setting `duration` drops `finish_date` and the other way round; clearing
+   * both makes a milestone. Resolves to false, without the event, if nothing
+   * changes. Rejects with a `MoveError` (`not_found`, `invalid`, as `parse()`
+   * would reject the result) without changing anything, and after a failed
+   * save, which also fires `save_failed`. With a REST backend, saved with
+   * `PATCH /views/{view_id}/tasks/{task_id}`.
+   */
+  async updateTask(id: Id, patch: TaskPatchData): Promise<boolean> {
+    const model = this.requireModel();
+    const snapshot = model.toData();
+    const { task, old } = model.updateTask(id, patch);
+    const before = taskToData(old);
+    const after = taskToData(task);
+    if (JSON.stringify(before) === JSON.stringify(after)) return false;
+    this.render();
+    this.emit("task_updated", { task_id: task.id, task: after, old_task: before });
+    await this.saveChange(
+      snapshot,
+      "update_task",
+      { task_id: task.id },
+      (api, viewId, version) => api.updateTask(viewId, task.id, patch, version),
+      (result, isLast) => {
+        // The server's copy, unless more changes are waiting.
+        if (!isLast) return;
+        this.model!.replaceTask(result.task);
+        this.render();
+      },
+    );
+    return true;
+  }
+
+  /**
    * Removes a task: from the tasks and from every timeline it is on (their
    * bar lines are trimmed as after a move). Deselects it, and fires
-   * `task_removed`. Throws a `MoveError` (`not_found`) for an unknown id.
-   * Not sent to the REST API.
+   * `task_removed`. The promise rejects with a `MoveError` (`not_found`) for
+   * an unknown id, and after a failed save, which also fires `save_failed`.
+   * With a REST backend, saved with `DELETE /views/{view_id}/tasks/{task_id}`.
    */
-  removeTask(id: Id): void {
-    const { task, timelines } = this.requireModel().removeTask(id);
+  async removeTask(id: Id): Promise<void> {
+    const model = this.requireModel();
+    const snapshot = model.toData();
+    const { task, timelines } = model.removeTask(id);
     this.render();
     this.dropStaleSelection();
     this.emit("task_removed", {
@@ -439,6 +733,13 @@ export class TimelineView {
       task: taskToData(task),
       timelines: timelines.map(timelineToData),
     });
+    await this.saveChange(
+      snapshot,
+      "remove_task",
+      { task_id: task.id },
+      (api, viewId, version) => api.removeTask(viewId, task.id, version),
+      this.takeTimelines,
+    );
   }
 
   /**
@@ -460,7 +761,7 @@ export class TimelineView {
       index,
       order: model.timelines.map((t) => t.id),
     });
-    await this.saveChange(snapshot, "remove_timeline", timeline.id, (api, viewId, version) =>
+    await this.saveChange(snapshot, "remove_timeline", { timeline_id: timeline.id }, (api, viewId, version) =>
       api.removeTimeline(viewId, timeline.id, version),
     );
   }
@@ -497,7 +798,7 @@ export class TimelineView {
       to_index: from + delta,
       order: model.timelines.map((t) => t.id),
     });
-    await this.saveChange(snapshot, "move_timeline", timeline.id, (api, viewId, version) =>
+    await this.saveChange(snapshot, "move_timeline", { timeline_id: timeline.id }, (api, viewId, version) =>
       api.updateTimeline(viewId, timeline.id, { position: from + delta }, version),
     );
     return true;
@@ -596,19 +897,34 @@ export class TimelineView {
   }
 
   /**
-   * Saves a view or timeline change. A failure fires `save_failed` and
-   * rejects the returned promise, as `move_failed` and `moveEntry` do.
+   * Saves a change other than an entry move. A failure fires `save_failed`
+   * (with `ids`: what the change was for) and rejects the returned promise,
+   * as `move_failed` and `moveEntry` do.
    */
   private saveChange<R extends { version: number }>(
     snapshot: TimelineViewData,
     action: SaveAction,
-    timelineId: Id | undefined,
+    ids: { timeline_id?: Id; task_id?: Id; marker_id?: Id },
     send: (api: RestClient, viewId: Id, version: number | undefined) => Promise<R>,
+    onResult?: (result: R, isLast: boolean) => void,
   ): Promise<void> {
-    const fail = (error: unknown) =>
-      this.emit("save_failed", { action, ...(timelineId !== undefined && { timeline_id: timelineId }), error });
-    return this.save(snapshot, send, fail);
+    const fail = (error: unknown) => this.emit("save_failed", { action, ...ids, error });
+    return this.save(snapshot, send, fail, onResult);
   }
+
+  /** After a marker add or update: the server's copy of the marker, unless more changes are waiting. */
+  private readonly takeMarker = (result: MarkerResultData, isLast: boolean): void => {
+    if (!isLast) return;
+    this.model!.replaceMarker(result.marker);
+    this.render();
+  };
+
+  /** After an entry add or removal: the server's copy of the timelines it changed, unless more changes are waiting. */
+  private readonly takeTimelines = (result: MoveResultData, isLast: boolean): void => {
+    if (!isLast) return;
+    this.model!.replaceTimelines(result.timelines);
+    this.render();
+  };
 
   /**
    * Hit test for dragging something into the view from outside: the drop
@@ -668,31 +984,70 @@ export class TimelineView {
    * without `placement`, a `callout_offset` makes a callout and otherwise
    * the entry goes on the bar, on `line` (default 0).
    *
-   * Throws a `MoveError`, changing nothing, if the timeline or task id is
-   * unknown, the task is already on the timeline (or new task data reuses an
-   * id), or the target is invalid. Not sent to the REST API.
+   * Like the other changes, the entry shows at once and the promise settles
+   * when it is saved, with a REST backend by
+   * `POST /views/{view_id}/timelines/{timeline_id}/entries` (a new task's
+   * data goes in the same request). Rejects with a `MoveError`, changing
+   * nothing, if the timeline or task id is unknown, the task is already on
+   * the timeline (or new task data reuses an id), or the target is invalid;
+   * and after a failed save, which also fires `save_failed`.
    */
-  addEntry(task: Id | TaskData, target: EntryTargetData): void {
+  async addEntry(task: Id | TaskData, target: EntryTargetData): Promise<void> {
     const model = this.requireModel();
-    const result = model.addEntry(task, {
-      timelineId: target.timeline_id,
-      ...(target.placement !== undefined && { placement: target.placement }),
-      ...(target.line !== undefined && { line: target.line }),
-      ...(target.new_line !== undefined && { newLine: target.new_line }),
-      ...(target.callout_offset !== undefined && { calloutOffset: target.callout_offset }),
-    });
+    const snapshot = model.toData();
+    const { timeline_id: timelineId, ...place } = target;
+    const result = model.addEntry(task, addTargetFromData(timelineId, place));
     this.highlighted = undefined;
     this.render();
     const timeline = timelineToData(result.timeline);
     const entry = timeline.entries.find((e) => "task" in e && String(e.task) === String(result.task.id)) as TaskEntryData;
+    const taskData = taskToData(result.task);
     this.emit("entry_added", {
       timeline_id: result.timeline.id,
       task_id: result.task.id,
-      task: taskToData(result.task),
+      task: taskData,
       new_task: result.created,
       entry,
       timeline,
     });
+    // The server gets the target as given, and applies the same rules.
+    const body: AddEntryData = { ...place, task: result.created ? taskData : result.task.id };
+    await this.saveChange(
+      snapshot,
+      "add_entry",
+      { timeline_id: result.timeline.id, task_id: result.task.id },
+      (api, viewId, version) => api.addEntry(viewId, result.timeline.id, body, version),
+      this.takeTimelines,
+    );
+  }
+
+  /**
+   * Takes a task off one timeline, and fires `entry_removed`. The task stays
+   * in the data (on its other timelines, or on none), and the timeline's bar
+   * lines are trimmed as after a move. With a REST backend, saved by
+   * `DELETE /views/{view_id}/timelines/{timeline_id}/entries/{task_id}`.
+   * The promise settles when saved; it rejects with a `MoveError`
+   * (`not_found`), changing nothing, if the task isn't on that timeline, and
+   * after a failed save, which also fires `save_failed`.
+   */
+  async removeEntry(timelineId: Id, taskId: Id): Promise<void> {
+    const model = this.requireModel();
+    const snapshot = model.toData();
+    const { entry, timeline } = model.removeEntry(timelineId, taskId);
+    this.render();
+    this.emit("entry_removed", {
+      timeline_id: timeline.id,
+      task_id: entry.taskId,
+      entry: entryToData(entry),
+      timeline: timelineToData(timeline),
+    });
+    await this.saveChange(
+      snapshot,
+      "remove_entry",
+      { timeline_id: timeline.id, task_id: entry.taskId },
+      (api, viewId, version) => api.removeEntry(viewId, timeline.id, entry.taskId, version),
+      this.takeTimelines,
+    );
   }
 
   /**
@@ -777,6 +1132,7 @@ export class TimelineView {
   /** Calls every `attachEvent` handler for `name`, with this view as `this`. */
   private callHandlers<K extends TimelineEventName>(name: K, ...args: Parameters<TimelineHandlers[K]>): void {
     // Copied, so a handler may detach itself (or others) while running.
+    // oxlint-disable-next-line unicorn/no-useless-spread -- the copy is the point
     for (const { name: n, handler } of [...this.handlers.values()]) {
       if (n === name) (handler as (this: TimelineView, ...a: Parameters<TimelineHandlers[K]>) => void).apply(this, args);
     }
@@ -785,7 +1141,8 @@ export class TimelineView {
   private onMarkerDrop({ marker, offset }: MarkerDropEvent): void {
     const found = this.model?.markers.find((m) => String(m.id) === marker);
     if (!found || (found.offset.x === offset.x && found.offset.y === offset.y)) return;
-    this.setMarkerOffset(found.id, offset);
+    // A failed save is reported through `save_failed`.
+    this.setMarkerOffset(found.id, offset).catch(() => undefined);
   }
 
   private onEntryClick(entry: HTMLElement, e: MouseEvent): void {

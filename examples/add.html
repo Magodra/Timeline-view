@@ -30,8 +30,11 @@
 </head>
 <body>
     <h1>Drag in from a list</h1>
-    <p>Drag a task or milestone from the list onto a bar line, the half line above or below the bar's lines (opens a new line), or a callout area above or below a bar. The target under the pointer is highlighted. A task can go on several timelines, but only once on each. Press Escape to cancel.</p>
-    <p class="controls"><span id="status">Nothing added yet.</span></p>
+    <p>Drag a task or milestone from the list onto a bar line, the half line above or below the bar's lines (opens a new line), or a callout area above or below a bar. The target under the pointer is highlighted. A task can go on several timelines, but only once on each. Press Escape to cancel. To take a task off a timeline, click it in the view and press "Remove from timeline" (<code>removeEntry</code>); the task stays in the data.</p>
+    <p class="controls">
+        <button type="button" id="remove_entry" disabled>Remove from timeline</button>
+        <span id="status">Nothing added yet.</span>
+    </p>
     <div class="layout">
         <div class="backlog">
             <h2>Backlog</h2>
@@ -109,11 +112,10 @@
                 ghost.remove();
                 timeline.highlightTarget(null);
                 if (!drop || !target) return;
-                try {
-                    timeline.addEntry(taskArg(task), target);
-                } catch (error) {
-                    status.textContent = error.message;   // for example: already on that timeline
-                }
+                // A refused drop rejects the promise, for example: already on that timeline.
+                timeline.addEntry(taskArg(task), target).catch((error) => {
+                    status.textContent = error.message;
+                });
             };
             const up = (e) => { move(e); end(true); };
             const cancel = () => end(false);
@@ -125,10 +127,33 @@
             move(down);
         });
 
-        // The host saves additions itself: there is no REST call for them yet.
+        // Without api_url the host saves changes itself, from these events.
+        // With a REST backend, addEntry and removeEntry save them too.
         timeline.on("entry_added", (e) => {
             status.textContent = `Added "${e.task.text}" to timeline ${e.timeline_id}${e.new_task ? " (new task)" : ""}.`;
             log.textContent = JSON.stringify(e, null, 2);
+        });
+        timeline.on("entry_removed", (e) => {
+            status.textContent = `Removed task ${e.task_id} from timeline ${e.timeline_id}.`;
+            log.textContent = JSON.stringify(e, null, 2);
+        });
+
+        // Taking a task off a timeline: click it in the view, then the button.
+        // removeEntry needs the timeline too, since a task can be on several.
+        const removeButton = document.getElementById("remove_entry");
+        let clicked = null;
+        timeline.attachEvent("onTaskClick", (taskId, e, timelineId) => {
+            clicked = { taskId, timelineId };
+            removeButton.disabled = false;
+        });
+        removeButton.addEventListener("click", () => {
+            if (!clicked) return;
+            const { taskId, timelineId } = clicked;
+            clicked = null;
+            removeButton.disabled = true;
+            timeline.removeEntry(timelineId, taskId).catch((error) => {
+                status.textContent = error.message;
+            });
         });
     </script>
 </body>

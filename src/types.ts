@@ -161,6 +161,61 @@ export interface EntryTargetData {
   callout_offset?: Offset;
 }
 
+/** Where an added entry goes on its timeline: an `EntryTargetData` without `timeline_id`. */
+export type AddEntryPlaceData = Omit<EntryTargetData, "timeline_id">;
+
+/**
+ * Body of `POST /views/{view_id}/timelines/{timeline_id}/entries`, minus
+ * `version`: the task (the id of one the view has, or a new task's data,
+ * which the server adds to the tasks) and where it goes.
+ */
+export interface AddEntryData extends AddEntryPlaceData {
+  task: Id | TaskData;
+}
+
+/**
+ * Changes to a task: the body of `PATCH /views/{view_id}/tasks/{task_id}`
+ * (minus `version`) and what `updateTask` takes. Send only what changes.
+ * `null` clears an optional field. The finish is given one way: setting
+ * `duration` drops `finish_date` and the other way round; clearing both
+ * makes the task a milestone.
+ */
+export interface TaskPatchData {
+  text?: string;
+  start_date?: string;
+  duration?: string | null;
+  finish_date?: string | null;
+  symbol?: MilestoneSymbol | null;
+  color?: string | null;
+}
+
+/**
+ * Changes to a marker: the body of `PATCH /views/{view_id}/markers/{marker_id}`
+ * (minus `version`) and what `updateMarker` takes. Send only what changes;
+ * `color: null` goes back to the theme's color.
+ */
+export interface MarkerPatchData {
+  text?: string;
+  date?: string;
+  color?: string | null;
+  global?: boolean;
+  marker_offset?: Offset;
+}
+
+/** Response of a successful marker add or update. */
+export interface MarkerResultData {
+  version: number;
+  /** The marker as the server now has it. */
+  marker: MarkerData;
+}
+
+/** Response of a successful task update. */
+export interface TaskResultData {
+  version: number;
+  /** The task as the server now has it. */
+  task: TaskData;
+}
+
 /** Body of `PATCH /views/{view_id}`, minus `version`. */
 export interface ViewPatchData {
   name?: string;
@@ -173,10 +228,19 @@ export interface ViewResultData {
 }
 
 /** Body of `PATCH /views/{view_id}/timelines/{timeline_id}`, minus `version`. Send only what changes. */
-export interface TimelinePatchData {
-  name?: string;
+export interface TimelinePatchData extends TimelineUpdateData {
   /** The timeline's 0-based index in the stack after the move. */
   position?: number;
+}
+
+/**
+ * Changes to a timeline's own fields: what `updateTimeline` takes. Send only
+ * what changes. The finish must stay after the start.
+ */
+export interface TimelineUpdateData {
+  name?: string;
+  start_date?: string;
+  finish_date?: string;
 }
 
 /** Response of a successful timeline add, update or removal: the new version and the timelines' order. */

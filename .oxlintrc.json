@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import", "vitest"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/await-thenable": "error",
+    "typescript/return-await": ["error", "in-try-catch"],
+    "typescript/no-base-to-string": "error",
+    "typescript/restrict-template-expressions": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-unused-vars": "error",
+    "eqeqeq": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "vitest/valid-expect": "off",
+    "vitest/require-mock-type-parameters": "off",
+    "vitest/require-to-throw-message": "off",
+    "vitest/no-conditional-expect": "off"
+  },
+  "ignorePatterns": ["dist/**", "docs/**", "node_modules/**"]
+}

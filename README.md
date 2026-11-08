@@ -47,6 +47,32 @@ view.parse({
 
 TypeScript types are included.
 
+## Use it from React
+
+An optional component, for React 18 or later:
+
+```jsx
+import { useRef, useState } from "react";
+import { Timeline } from "ar-timeline-view/react";
+import "ar-timeline-view/timelineview.css";
+
+function Plan({ initialData }) {
+  const [data] = useState(initialData);
+  const view = useRef(null);   // the TimelineView, for moveEntry, updateTask, toSVG, ...
+  return (
+    <Timeline
+      ref={view}
+      data={data}
+      style={{ height: "100%" }}
+      onEntryMoved={(e) => save(e)}
+      onTaskClick={(taskId, event, timelineId) => console.log(taskId, timelineId)}
+    />
+  );
+}
+```
+
+Every event is a prop (`onEntryMoved`, `onSaveFailed`, `onTaskClick`, ...), and the `ref` is the `TimelineView` for everything else. React is only needed for this import.
+
 ## Use it from a script tag
 
 The UMD build sets a global `timeline` object with a default instance:
@@ -92,6 +118,7 @@ timeline.load("my-view-id");
 | File | Use |
 |------|-----|
 | `dist/timelineview.mjs` | ES module (`import`) |
+| `dist/react.mjs` | Optional React component (`import { Timeline } from "ar-timeline-view/react"`) |
 | `dist/timelineview.js` | UMD build, global `timeline` |
 | `dist/timelineview.css` | Styles, themable through `--tlv-*` custom properties |
 | `dist/types/` | TypeScript declarations |

@@ -1,8 +1,14 @@
 import type {
+  AddEntryData,
   Id,
+  MarkerData,
+  MarkerPatchData,
+  MarkerResultData,
   MovePatchData,
   MoveResultData,
   OrderResultData,
+  TaskPatchData,
+  TaskResultData,
   TimelineData,
   TimelinePatchData,
   TimelineViewData,
@@ -22,6 +28,10 @@ export class ApiError extends Error {
 }
 
 const seg = (id: Id) => encodeURIComponent(String(id));
+
+/** A DELETE has no body, so it sends the view version as a query parameter. */
+const versionQuery = (version: number | undefined) =>
+  version === undefined ? "" : `?version=${encodeURIComponent(version)}`;
 
 /** Client for the REST API described in CLAUDE.md and docs/api/openapi.yaml. */
 export class RestClient {
@@ -52,6 +62,56 @@ export class RestClient {
     });
   }
 
+  /** `POST /views/{view_id}/timelines/{timeline_id}/entries`: adds a task (known or new) to a timeline. */
+  addEntry(viewId: Id, timelineId: Id, body: AddEntryData, version: number | undefined): Promise<MoveResultData> {
+    return this.json("POST", `/views/${seg(viewId)}/timelines/${seg(timelineId)}/entries`, body, version);
+  }
+
+  /** `DELETE /views/{view_id}/timelines/{timeline_id}/entries/{task_id}?version=`: takes a task off a timeline. */
+  removeEntry(viewId: Id, timelineId: Id, taskId: Id, version: number | undefined): Promise<MoveResultData> {
+    return this.request(`/views/${seg(viewId)}/timelines/${seg(timelineId)}/entries/${seg(taskId)}${versionQuery(version)}`, {
+      method: "DELETE",
+    });
+  }
+
+  /** `PATCH /views/{view_id}/tasks/{task_id}`: changes a task's fields. */
+  updateTask(viewId: Id, taskId: Id, patch: TaskPatchData, version: number | undefined): Promise<TaskResultData> {
+    return this.json("PATCH", `/views/${seg(viewId)}/tasks/${seg(taskId)}`, patch, version);
+  }
+
+  /** `DELETE /views/{view_id}/tasks/{task_id}?version=`: removes a task from the view and all its timelines. */
+  removeTask(viewId: Id, taskId: Id, version: number | undefined): Promise<MoveResultData> {
+    return this.request(`/views/${seg(viewId)}/tasks/${seg(taskId)}${versionQuery(version)}`, { method: "DELETE" });
+  }
+
+  /** `POST /views/{view_id}/markers`: adds a marker. */
+  addMarker(viewId: Id, marker: MarkerData, version: number | undefined): Promise<MarkerResultData> {
+    return this.json("POST", `/views/${seg(viewId)}/markers`, { marker }, version);
+  }
+
+  /** `PATCH /views/{view_id}/markers/{marker_id}`: changes a marker, or moves its label. */
+  updateMarker(viewId: Id, markerId: Id, patch: MarkerPatchData, version: number | undefined): Promise<MarkerResultData> {
+    return this.json("PATCH", `/views/${seg(viewId)}/markers/${seg(markerId)}`, patch, version);
+  }
+
+  /** `DELETE /views/{view_id}/markers/{marker_id}?version=`: removes a marker. */
+  removeMarker(viewId: Id, markerId: Id, version: number | undefined): Promise<MoveResultData> {
+    return this.request(`/views/${seg(viewId)}/markers/${seg(markerId)}${versionQuery(version)}`, { method: "DELETE" });
+  }
+
+  /** `PUT /views/{view_id}/timelines/{timeline_id}/markers/{marker_id}`: shows a marker on a timeline. */
+  showMarker(viewId: Id, timelineId: Id, markerId: Id, version: number | undefined): Promise<MoveResultData> {
+    return this.json("PUT", `/views/${seg(viewId)}/timelines/${seg(timelineId)}/markers/${seg(markerId)}`, {}, version);
+  }
+
+  /** `DELETE /views/{view_id}/timelines/{timeline_id}/markers/{marker_id}?version=`: stops showing it there. */
+  hideMarker(viewId: Id, timelineId: Id, markerId: Id, version: number | undefined): Promise<MoveResultData> {
+    return this.request(
+      `/views/${seg(viewId)}/timelines/${seg(timelineId)}/markers/${seg(markerId)}${versionQuery(version)}`,
+      { method: "DELETE" },
+    );
+  }
+
   /** `PATCH /views/{view_id}`: renames the view. */
   updateView(viewId: Id, patch: ViewPatchData, version: number | undefined): Promise<ViewResultData> {
     return this.json("PATCH", `/views/${seg(viewId)}`, patch, version);
@@ -69,8 +129,7 @@ export class RestClient {
 
   /** `DELETE /views/{view_id}/timelines/{timeline_id}?version=`: removes a timeline. */
   removeTimeline(viewId: Id, timelineId: Id, version: number | undefined): Promise<OrderResultData> {
-    const query = version === undefined ? "" : `?version=${encodeURIComponent(version)}`;
-    return this.request(`/views/${seg(viewId)}/timelines/${seg(timelineId)}${query}`, { method: "DELETE" });
+    return this.request(`/views/${seg(viewId)}/timelines/${seg(timelineId)}${versionQuery(version)}`, { method: "DELETE" });
   }
 
   /** A request with a JSON body, with `version` added when known. */
@@ -83,10 +142,10 @@ export class RestClient {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const res = await this.fetchImpl(this.baseUrl + path, {
-      ...init,
-      headers: { Accept: "application/json", ...init.headers },
-    });
+    // `Headers` accepts every form of `init.headers` (object, array of pairs, or Headers).
+    const headers = new Headers(init.headers);
+    if (!headers.has("Accept")) headers.set("Accept", "application/json");
+    const res = await this.fetchImpl(this.baseUrl + path, { ...init, headers });
     const text = await res.text();
     let body: unknown;
     try {

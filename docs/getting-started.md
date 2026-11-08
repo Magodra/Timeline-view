@@ -49,6 +49,17 @@ const view = new TimelineView(document.getElementById("timeline_here"));
 view.parse(data);
 ```
 
+## Use it from React
+
+```jsx
+import { Timeline } from "ar-timeline-view/react";
+import "ar-timeline-view/timelineview.css";
+
+<Timeline data={data} onEntryMoved={(e) => save(e)} />;
+```
+
+React is only needed for this import. See [Using it from React](user-guide.md#using-it-from-react) for the props.
+
 ## Save changes
 
 Without a backend, listen for moves and save them yourself:
@@ -60,7 +71,7 @@ timeline.on("entry_moved", ({ timeline_id, task_id, patch }) => {
 });
 ```
 
-Or point the view at a backend that implements the [REST API](api/openapi.yaml); the view then saves moves, renames, and added, reordered and removed timelines itself:
+Or point the view at a backend that implements the [REST API](api/openapi.yaml); the view then saves moves, added and removed entries, task edits and removals, markers, renames, and added, changed, reordered and removed timelines itself:
 
 ```js
 timeline.init("timeline_here", { api_url: "https://example.com/api" });

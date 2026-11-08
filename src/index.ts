@@ -1,5 +1,4 @@
-import "./styles.css";
-import type { EntryTargetData, Id, MovePatchData, Offset, TaskData, TimelineData, TimelineViewData } from "./types";
+import type { EntryTargetData, Id, MarkerData, MarkerPatchData, MovePatchData, Offset, TaskData, TaskPatchData, TimelineData, TimelineUpdateData, TimelineViewData } from "./types";
 import {
   TimelineView,
   type TimelineEventName,
@@ -11,22 +10,39 @@ import {
 export * from "./types";
 export { ApiError, RestClient } from "./api";
 // The model is exported so JavaScript backends and mock servers can apply the same move rules.
-export { MoveError, TimelineModel, firstLine, lineCount, patchFromData, trimLines, timelineToData } from "./model";
+export {
+  MoveError,
+  TimelineModel,
+  addTargetFromData,
+  entryToData,
+  firstLine,
+  lineCount,
+  patchFromData,
+  trimLines,
+  timelineToData,
+} from "./model";
 export { parseDuration, addDuration } from "./duration";
 export {
   MoveCancelledError,
   TimelineView,
   type EntryAddedEvent,
   type EntryMovedEvent,
+  type MarkerAddedEvent,
   type MarkerMovedEvent,
+  type MarkerRemovedEvent,
+  type MarkerUpdatedEvent,
+  type MarkerVisibilityEvent,
+  type EntryRemovedEvent,
   type MoveFailedEvent,
   type SaveAction,
   type SaveFailedEvent,
   type TimelineAddedEvent,
   type TaskRemovedEvent,
+  type TaskUpdatedEvent,
   type TimelineMovedEvent,
   type TimelineRemovedEvent,
   type TimelineRenamedEvent,
+  type TimelineUpdatedEvent,
   type ViewRenamedEvent,
   type TimelineEvents,
   type TimelineEventName,
@@ -59,6 +75,8 @@ export const resize = () => instance().resize();
 export const moveEntry = (timelineId: Id, taskId: Id, patch: MovePatchData) =>
   instance().moveEntry(timelineId, taskId, patch);
 export const addEntry = (task: Id | TaskData, target: EntryTargetData) => instance().addEntry(task, target);
+export const updateTask = (id: Id, patch: TaskPatchData) => instance().updateTask(id, patch);
+export const removeEntry = (timelineId: Id, taskId: Id) => instance().removeEntry(timelineId, taskId);
 export const targetAt = (x: number, y: number, task?: Id | TaskData) => instance().targetAt(x, y, task);
 export const highlightTarget = (target: EntryTargetData | null) => instance().highlightTarget(target);
 export const attachEvent = <K extends TimelineEventName>(name: K, handler: TimelineHandlers[K]) =>
@@ -72,6 +90,11 @@ export const clearSelection = () => instance().clearSelection();
 export const getSelectedTasks = () => instance().getSelectedTasks();
 export const getSelectedTimelines = () => instance().getSelectedTimelines();
 export const setMarkerOffset = (markerId: Id, offset: Offset) => instance().setMarkerOffset(markerId, offset);
+export const addMarker = (data: MarkerData) => instance().addMarker(data);
+export const updateMarker = (id: Id, patch: MarkerPatchData) => instance().updateMarker(id, patch);
+export const removeMarker = (id: Id) => instance().removeMarker(id);
+export const showMarker = (timelineId: Id, markerId: Id) => instance().showMarker(timelineId, markerId);
+export const hideMarker = (timelineId: Id, markerId: Id) => instance().hideMarker(timelineId, markerId);
 export const moveTimelineUp = (id: Id) => instance().moveTimelineUp(id);
 export const moveTimelineDown = (id: Id) => instance().moveTimelineDown(id);
 export const moveTimeline = (id: Id, delta: number) => instance().moveTimeline(id, delta);
@@ -81,5 +104,6 @@ export const addTimeline = (data: TimelineData, position?: number) => instance()
 export const whenSaved = () => instance().whenSaved();
 export const renameView = (name: string) => instance().renameView(name);
 export const renameTimeline = (id: Id, name: string) => instance().renameTimeline(id, name);
+export const updateTimeline = (id: Id, patch: TimelineUpdateData) => instance().updateTimeline(id, patch);
 export const on = <K extends keyof TimelineEvents>(name: K, handler: (event: TimelineEvents[K]) => void) =>
   instance().on(name, handler);

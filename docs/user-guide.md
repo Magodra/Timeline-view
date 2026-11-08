@@ -61,7 +61,7 @@ An entry can't have both `line` and `callout_offset`. One task can appear on sev
 
 ### Tasks and milestones
 
-A task's finish is either its `start_date` plus its `duration`, or a `finish_date` you give instead. Use one or the other, not both. A task with neither, a zero `duration`, or a `finish_date` equal to its `start_date` is a **milestone** and is drawn as a symbol. Otherwise it is drawn as a bar from its start date to its finish date.
+A task's finish is either its `start_date` plus its `duration`, or a `finish_date` you give instead. Use one or the other, not both. A task with neither, a zero `duration`, or a `finish_date` equal to its `start_date` is a **milestone** and is drawn as a symbol: `diamond` (the default), `circle`, `square`, `triangle` or `star`, set for all milestones by `view.milestone_symbol` or for one by its `symbol`. Any other value is an error: `parse()` throws. Otherwise the task is drawn as a bar from its start date to its finish date.
 
 ```js
 { id: 1, text: "Build", start_date: "2026-04-01", duration: "2w" },
@@ -204,7 +204,29 @@ timeline.on("marker_moved", (e) => { /* e.marker_id, e.marker_offset */ });
 timeline.setMarkerOffset("today", { x: 10, y: 20 });   // the same from code
 ```
 
-Markers have no REST call yet, so with a backend, saving a moved label is up to you (for example in `marker_moved`).
+With a REST backend a moved label is saved too.
+
+You can also add, change and remove markers from code:
+
+```js
+timeline.addMarker({ id: "golive", text: "Go-live", date: "2026-05-04" });   // shows on no timeline yet
+timeline.showMarker("dev", "golive");                                        // ...now on "dev"
+timeline.hideMarker("dev", "golive");
+timeline.updateMarker("golive", { text: "Launch", color: "purple" });        // only what changes
+timeline.updateMarker("golive", { color: null, global: true });             // theme color, on every timeline
+timeline.removeMarker("golive");                                             // also from every timeline
+```
+
+`addMarker` takes a marker in the same format as `markers`. A `global` marker shows on every timeline; any other only on the timelines you show it on (`showMarker`, which adds the timeline's `{ marker }` entry). The changes are checked as `parse()` would check them; an invalid one is refused and nothing changes. Like the other changes they return promises, and fire events:
+
+| Event | Gets |
+|-------|------|
+| `marker_added` | `{ marker_id, marker }` |
+| `marker_updated` | `{ marker_id, marker, old_marker }`: after and before (a moved label fires this and `marker_moved`) |
+| `marker_removed` | `{ marker_id, marker, timelines }`: the timelines that showed it by entry, after the removal |
+| `marker_shown`, `marker_hidden` | `{ timeline_id, marker_id, timeline }` |
+
+With a REST backend all of them are saved. [examples/rest.html](../examples/rest.html) has a small marker editor.
 
 With `absolute: true` the line runs straight down the common time axis. Without it, each timeline has its own axis, so the line is drawn only on the timelines whose range holds the date, and a global marker is drawn on each timeline separately: a line across that timeline's bar and its own label, just as if you had added the marker to that timeline alone. The labels share the marker's `marker_offset`, so dragging one moves them all.
 
@@ -227,7 +249,7 @@ To let users drag items from your own page (a backlog list, a search result) ont
 
 - `timeline.targetAt(x, y, task)` returns the drop target at a point, in client coordinates (`e.clientX`, `e.clientY` of a pointer or drag event), or `null` outside the view. A target is `{ timeline_id, placement, line, new_line }` for a bar line (`new_line: true` on the strip above the first line or below the last), or `{ timeline_id, placement, callout_offset }` for the area above or below a bar. Inside the view but not on a bar line or label area (on a name or the time scale), it is the nearest label area, as for drags inside the view. Pass `task` (its id, or the data of a new task) to get a `callout_offset` that puts the label's corner at the point; without it the label gets the default position. Your drag ghost may cover the view: `targetAt` looks through elements that aren't part of the view.
 - `timeline.highlightTarget(target)` highlights that target the way the view's own drags do; `highlightTarget(null)` removes the highlight.
-- `timeline.addEntry(task, target)` adds the task there. `task` is the id of a task the view already has, or a new task's data (as in `tasks`), which is added to the view's tasks. It fires `entry_added`, and throws without changing anything if the timeline or task is unknown, the task is already on that timeline (a task can be on several timelines, once on each), new task data reuses an existing id, or the target is invalid.
+- `timeline.addEntry(task, target)` adds the task there. `task` is the id of a task the view already has, or a new task's data (as in `tasks`), which is added to the view's tasks. It fires `entry_added`, and returns a promise like the other changes (see [Saving to a REST backend](#saving-to-a-rest-backend)). The promise rejects without changing anything if the timeline or task is unknown, the task is already on that timeline (a task can be on several timelines, once on each), new task data reuses an existing id, or the target is invalid.
 
 ```js
 // In your pointermove handler:
@@ -236,12 +258,62 @@ timeline.highlightTarget(target);
 
 // In your pointerup handler:
 timeline.highlightTarget(null);
-if (target) timeline.addEntry(task, target);
+if (target) timeline.addEntry(task, target).catch((error) => showMessage(error.message));
 ```
 
 You can also build a target yourself: `addEntry(5, { timeline_id: 2 })` puts task 5 on line 0 of timeline 2's bar, and `{ timeline_id: 2, callout_offset: { x: 0, y: 20 } }` makes it a label below the bar. The same placement rules as for moves apply, and the bar is trimmed afterwards in the same way.
 
-`entry_added` gets `{ timeline_id, task_id, task, new_task, entry, timeline }`: the task's data, whether it was new, the new entry, and the whole timeline after the add (inserting a line renumbers the lines below it). There is no REST call for adding entries yet, so with a backend, saving the addition is up to you.
+`entry_added` gets `{ timeline_id, task_id, task, new_task, entry, timeline }`: the task's data, whether it was new, the new entry, and the whole timeline after the add (inserting a line renumbers the lines below it). With a REST backend the addition is saved too, a new task in the same request as its entry.
+
+### Taking a task off a timeline
+
+`timeline.removeEntry(timeline_id, task_id)` takes a task off one timeline. The task stays in the data, on its other timelines or on none, so you can add it again later; use `removeTask` to delete it everywhere. The timeline's bar lines close up as after a move. It fires `entry_removed` with `{ timeline_id, task_id, entry, timeline }`, and returns a promise that rejects if the task isn't on that timeline. A task can be on several timelines, so it needs both ids; `onTaskClick` gives you both:
+
+```js
+let clicked;
+timeline.attachEvent("onTaskClick", (taskId, e, timelineId) => (clicked = { taskId, timelineId }));
+document.getElementById("remove").addEventListener("click", () => {
+  if (clicked) timeline.removeEntry(clicked.timelineId, clicked.taskId).catch(() => {});
+});
+```
+
+[examples/add.html](../examples/add.html) does this with a "Remove from timeline" button.
+
+## Using it from React
+
+`ar-timeline-view/react` has an optional `Timeline` component (React 18 or later; only this import needs React):
+
+```jsx
+import { useRef, useState } from "react";
+import { Timeline } from "ar-timeline-view/react";
+import "ar-timeline-view/timelineview.css";
+
+function Plan({ initialData }) {
+  const [data] = useState(initialData);
+  const view = useRef(null);   // the TimelineView, for moveEntry, updateTask, toSVG, ...
+  return (
+    <Timeline
+      ref={view}
+      data={data}
+      style={{ height: "100%" }}
+      onEntryMoved={(e) => save(e)}
+      onTaskClick={(taskId, event, timelineId) => console.log(taskId, timelineId)}
+    />
+  );
+}
+```
+
+| Prop | Meaning |
+|------|---------|
+| `data` | The data to show, as for `parse()`. It is loaded when the component mounts and again whenever you pass a different object; re-rendering with the same object doesn't reload it. |
+| `apiUrl`, `fetch` | As the `api_url` and `fetch` options: with `apiUrl`, changes are saved to the REST backend. Changing either creates a new view. |
+| `viewId` | With `apiUrl`: the view to load from the backend (`load()`), again when it changes. |
+| `on...` | Every event as a prop: `onEntryMoved` for `entry_moved`, `onSaveFailed` for `save_failed`, and so on, plus `onTaskClick`, `onTimelineClick`, `onTaskSelected` and `onTimelineSelected`. The current handler is always called; passing a new function doesn't re-subscribe anything. |
+| `onError` | Called when `data` is invalid or `viewId` can't be loaded. Without it, invalid data throws (to your error boundary). |
+| `className`, `style` | For the view's container, which sizes as in [Sizing the container](#sizing-the-container). |
+| `ref` | The `TimelineView`, for everything else: `moveEntry`, `updateTask`, `selectTask`, `toSVG`, `whenSaved`, ... It is `null` until mounted. |
+
+The component creates the view when it mounts and destroys it when it unmounts, and works under `StrictMode`. Changes made in the view (dragging, or calls through the `ref`) stay in the view; you don't need to feed them back through `data`. Pass new `data` only to show something else. Inside a dockview panel, give it `style={{ height: "100%" }}` (see [Resizing, and docking panels](#resizing-and-docking-panels)).
 
 ## Exporting as SVG
 
@@ -313,6 +385,31 @@ timeline.getSelectedTimelines();        // ["dev"], or []
 
 Set `selection: false` in the view to turn selection off: clicks still fire `onTaskClick` and `onTimelineClick`, but nothing is selected or highlighted, and `selectTask`/`selectTimeline` return `false`. The highlight colors are `--tlv-selected`, `--tlv-selected-bg` and `--tlv-selected-text`. SVG exports leave the selection out.
 
+## Editing tasks
+
+`timeline.updateTask(id, changes)` changes a task wherever it appears: its `text`, `start_date`, `duration` or `finish_date`, `symbol` or `color`. Give only what changes; `null` clears an optional field.
+
+```js
+timeline.updateTask("build", { text: "Build and test" });
+timeline.updateTask("build", { start_date: "2026-05-04" });              // the duration moves with it
+timeline.updateTask("build", { finish_date: "2026-06-30" });             // a fixed finish instead of the duration
+timeline.updateTask("review", { duration: null, finish_date: null });    // now a milestone
+timeline.updateTask("review", { color: null });                          // back to the theme's color
+```
+
+A task's finish is given one way: setting `duration` drops `finish_date`, and the other way round. The result is checked as `parse()` would check it; a change that would make it invalid (a finish before the start, a bad date or duration, an unknown symbol or color) is refused and nothing changes. Like the other changes it returns a promise: it resolves to `true`, or to `false` when nothing changed, and rejects for a refused change. It fires `task_updated` with `{ task_id, task, old_task }`: the task's data after and before. With a REST backend the change is saved too.
+
+## Changing a timeline's dates
+
+`timeline.updateTimeline(id, changes)` changes a timeline's `name`, `start_date` and/or `finish_date`; give only what changes. The finish must stay after the start, or the change is refused and nothing changes.
+
+```js
+timeline.updateTimeline("dev", { finish_date: "2027-06-30" });                         // a longer timeline
+timeline.updateTimeline("dev", { start_date: "2026-02-01", name: "Development" });    // several at once
+```
+
+Tasks that now fall outside the range stay on the timeline: they are drawn at its edge with an arrow, as in loaded data. With `absolute: true` the view's common time axis follows the new range. It returns a promise like the other changes (`false` when nothing changed) and fires `timeline_updated` with `{ timeline_id, timeline, old_timeline }`, plus `timeline_renamed` when the name changed. With a REST backend it is saved too. `renameTimeline(id, name)` is the same as `updateTimeline(id, { name })`.
+
 ## Renaming
 
 `timeline.renameView(name)` changes the view's name, shown as the heading (`""` removes the heading). `timeline.renameTimeline(id, name)` changes a timeline's name label. Like all the view and timeline changes, they return a promise (see [Saving to a REST backend](#saving-to-a-rest-backend)): it resolves to `true`, or to `false` when the name is unchanged and nothing happened, and rejects for an unknown timeline or a name that isn't a string. They fire:
@@ -326,7 +423,7 @@ With a REST backend they are saved too (see [Saving to a REST backend](#saving-t
 
 ## Removing tasks and timelines
 
-`timeline.removeTask(id)` removes a task: from the tasks, and from every timeline it is on. The bar lines of those timelines are tidied up as after a move. `timeline.removeTimeline(id)` removes a timeline with its entries; its tasks stay in the data, even those that are now on no timeline. Both deselect what they remove. `removeTask` throws for an unknown id; `removeTimeline` returns a promise, which rejects for one.
+`timeline.removeTask(id)` removes a task: from the tasks, and from every timeline it is on. The bar lines of those timelines are tidied up as after a move. `timeline.removeTimeline(id)` removes a timeline with its entries; its tasks stay in the data, even those that are now on no timeline. Both deselect what they remove, and return a promise that rejects for an unknown id.
 
 They fire `task_removed` and `timeline_removed`:
 
@@ -335,7 +432,7 @@ They fire `task_removed` and `timeline_removed`:
 | `task_removed` | `{ task_id, task, timelines }`: the removed task's data, and the timelines it was on, as they are now. |
 | `timeline_removed` | `{ timeline_id, timeline, index, order }`: the removed timeline's data, its 0-based position before, and the remaining timelines' ids from top to bottom. |
 
-With a REST backend, `removeTimeline` is saved too (see [Saving to a REST backend](#saving-to-a-rest-backend)); `removeTask` isn't yet, so save task removals yourself, for example in `task_removed`. The component has no remove buttons; [examples/features.html](../examples/features.html) adds one for the selection:
+With a REST backend both are saved too (see [Saving to a REST backend](#saving-to-a-rest-backend)). The component has no remove buttons; [examples/features.html](../examples/features.html) adds one for the selection:
 
 ```js
 document.getElementById("remove").addEventListener("click", () => {
@@ -377,12 +474,16 @@ timeline.attachEvent("onTimelineSelected", (ids) => {
 const off = timeline.on("entry_moved", (e) => { /* e.timeline_id, e.task_id, e.patch */ });
 timeline.on("move_failed", (e) => { /* e.error; the view already shows the restored state */ });
 timeline.on("marker_moved", (e) => { /* e.marker_id, e.marker_offset: a marker label was moved */ });
+timeline.on("marker_updated", (e) => { /* e.marker_id, e.marker, e.old_marker */ });  // also marker_added, marker_removed, marker_shown, marker_hidden
 timeline.on("entry_added", (e) => { /* e.timeline_id, e.task_id, e.task, e.new_task, e.entry, e.timeline */ });
+timeline.on("entry_removed", (e) => { /* e.timeline_id, e.task_id, e.entry, e.timeline */ });
 timeline.on("timeline_moved", (e) => { /* e.timeline_id, e.from_index, e.to_index, e.order */ });
 timeline.on("task_removed", (e) => { /* e.task_id, e.task, e.timelines */ });
+timeline.on("task_updated", (e) => { /* e.task_id, e.task, e.old_task */ });
 timeline.on("timeline_removed", (e) => { /* e.timeline_id, e.timeline, e.index, e.order */ });
 timeline.on("view_renamed", (e) => { /* e.name, e.old_name */ });
 timeline.on("timeline_renamed", (e) => { /* e.timeline_id, e.name, e.old_name */ });
+timeline.on("timeline_updated", (e) => { /* e.timeline_id, e.timeline, e.old_timeline */ });
 timeline.on("timeline_added", (e) => { /* e.timeline_id, e.timeline, e.index, e.order */ });
 timeline.on("save_failed", (e) => { /* e.action, e.timeline_id, e.error; the view already shows the restored state */ });
 off(); // unsubscribe
@@ -395,14 +496,22 @@ With `api_url` set (`timeline.init("timeline_here", { api_url })`), the view sav
 | Change | Request |
 |--------|---------|
 | Moving an entry (dragging, or `moveEntry`) | `PATCH /views/{view_id}/timelines/{timeline_id}/entries/{task_id}` |
+| `addEntry` (a new task goes in the same request) | `POST /views/{view_id}/timelines/{timeline_id}/entries` |
+| `removeEntry` | `DELETE /views/{view_id}/timelines/{timeline_id}/entries/{task_id}` |
+| `updateTask` | `PATCH /views/{view_id}/tasks/{task_id}` |
+| `removeTask` | `DELETE /views/{view_id}/tasks/{task_id}` |
+| `addMarker` | `POST /views/{view_id}/markers` |
+| `updateMarker`, `setMarkerOffset`, dragging a marker's label | `PATCH /views/{view_id}/markers/{marker_id}` |
+| `removeMarker` | `DELETE /views/{view_id}/markers/{marker_id}` |
+| `showMarker` / `hideMarker` | `PUT` / `DELETE /views/{view_id}/timelines/{timeline_id}/markers/{marker_id}` |
 | `renameView` | `PATCH /views/{view_id}` |
 | `addTimeline` | `POST /views/{view_id}/timelines` |
-| `renameTimeline`, `moveTimelineUp` / `moveTimelineDown` / `moveTimeline` | `PATCH /views/{view_id}/timelines/{timeline_id}` |
+| `updateTimeline`, `renameTimeline`, `moveTimelineUp` / `moveTimelineDown` / `moveTimeline` | `PATCH /views/{view_id}/timelines/{timeline_id}` |
 | `removeTimeline` | `DELETE /views/{view_id}/timelines/{timeline_id}` |
 
 Each change shows at once and is sent in the background, one request at a time, in the order you made them. Every request carries the view's `version`, so the server can tell when someone else changed the view in the meantime: it then answers 409 with the current view, and the view shows that. If a request fails in any other way, the view goes back to how it was before that change (undoing the changes made after it too) and fires `move_failed` (entry moves) or `save_failed` (everything else). `await timeline.whenSaved()` waits until everything has been answered, for example before closing a page.
 
-Each of these calls (`moveEntry`, `renameView`, `addTimeline`, `renameTimeline`, the `moveTimeline` calls, `removeTimeline`) changes the view at once, before it returns, and returns a promise that settles when the change is saved; without a backend, at once. The promise rejects if the input is invalid (nothing changes), and if saving fails (the view is already restored, and `move_failed` or `save_failed` has fired). So you can either wait for each change, or fire and forget and listen for the failure events:
+Each of these calls (`moveEntry`, `addEntry`, `removeEntry`, `updateTask`, `removeTask`, `renameView`, `addTimeline`, `updateTimeline`, `renameTimeline`, the `moveTimeline` calls, `removeTimeline`, and the marker calls `addMarker`, `updateMarker`, `setMarkerOffset`, `removeMarker`, `showMarker`, `hideMarker`) changes the view at once, before it returns, and returns a promise that settles when the change is saved; without a backend, at once. The promise rejects if the input is invalid (nothing changes), and if saving fails (the view is already restored, and `move_failed` or `save_failed` has fired). So you can either wait for each change, or fire and forget and listen for the failure events:
 
 ```js
 try {
@@ -417,7 +526,7 @@ timeline.on("save_failed", (e) => showMessage(`Couldn't save (${e.action})`));
 timeline.moveTimelineUp("dev").catch(() => {});   // the rejection is handled by save_failed
 ```
 
-Not saved yet: adding entries from outside the view (`addEntry`), removing tasks, and moving marker labels. Save those yourself from `entry_added`, `task_removed` and `marker_moved`.
+Everything you can change in the view is saved.
 
 ## Theming
 

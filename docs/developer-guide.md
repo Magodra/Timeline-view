@@ -6,7 +6,7 @@
 npm install
 npm run dev     # dev server with the examples, against the TypeScript source
 npm test        # Vitest
-npm run lint    # type-check
+npm run lint    # type-check (tsc), then lint (oxlint, rules in .oxlintrc.json)
 npm run build   # dist/: UMD + ESM bundles, CSS, type declarations
 ```
 

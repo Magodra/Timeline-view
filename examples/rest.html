@@ -16,8 +16,21 @@
         The buttons below rename the view (<code>PATCH /views/demo</code>), and add
         (<code>POST /views/demo/timelines</code>), rename or move
         (<code>PATCH /views/demo/timelines/{timeline_id}</code>) and remove
-        (<code>DELETE /views/demo/timelines/{timeline_id}</code>) timelines; click a timeline's name
-        to select it first. The backend here is a mock running in the page, with 300 ms latency.
+        (<code>DELETE /views/demo/timelines/{timeline_id}</code>) timelines, or make one a month longer
+        (the same <code>PATCH</code>, with <code>finish_date</code>); click a timeline's name
+        to select it first. "Add milestone" puts a new milestone with that name on the selected
+        timeline (<code>POST /views/demo/timelines/{timeline_id}/entries</code>), and "Remove task
+        from timeline" takes the task you clicked last off its timeline
+        (<code>DELETE /views/demo/timelines/{timeline_id}/entries/{task_id}</code>).
+        "Rename task" and "1 week later" change the task you clicked last
+        (<code>PATCH /views/demo/tasks/{task_id}</code>), and "Delete task" removes it from every
+        timeline (<code>DELETE /views/demo/tasks/{task_id}</code>).
+        The marker buttons work on the marker picked in the list: add one with the name typed
+        (<code>POST /views/demo/markers</code>), rename it (<code>PATCH /views/demo/markers/{marker_id}</code>,
+        which also saves a dragged marker label), show it on or hide it from the selected timeline
+        (<code>PUT</code> / <code>DELETE /views/demo/timelines/{timeline_id}/markers/{marker_id}</code>),
+        or remove it (<code>DELETE /views/demo/markers/{marker_id}</code>).
+        The backend here is a mock running in the page, with 300 ms latency.
     </p>
     <p class="controls">
         <input type="text" id="name" placeholder="Name" aria-label="Name">
@@ -27,6 +40,20 @@
         <button type="button" id="up">Move up</button>
         <button type="button" id="down">Move down</button>
         <button type="button" id="remove">Remove timeline</button>
+        <button type="button" id="longer">Timeline 1 month longer</button>
+        <button type="button" id="add_entry">Add milestone</button>
+        <button type="button" id="remove_entry">Remove task from timeline</button>
+        <button type="button" id="rename_task">Rename task</button>
+        <button type="button" id="later">1 week later</button>
+        <button type="button" id="remove_task">Delete task</button>
+    </p>
+    <p class="controls">
+        <label>Marker: <select id="marker"></select></label>
+        <button type="button" id="add_marker">Add marker</button>
+        <button type="button" id="rename_marker">Rename marker</button>
+        <button type="button" id="show_marker">Show on timeline</button>
+        <button type="button" id="hide_marker">Hide from timeline</button>
+        <button type="button" id="remove_marker">Remove marker</button>
     </p>
     <p class="controls">
         <label><input type="checkbox" id="fail"> Make the server reject the next change (500)</label>
@@ -51,9 +78,13 @@
                     { task: 1, line: 0 },
                     { task: 3, line: 1 },
                     { task: 2, callout_offset: { x: 10, y: -16 } },
-                    { task: 4, callout_offset: { x: -60, y: 16 } }
+                    { task: 4, callout_offset: { x: -60, y: 16 } },
+                    { marker: "review" }
                 ]},
                 { id: 2, name: "Team B", start_date: "2026-03-01", finish_date: "2026-06-01", entries: [] }
+            ],
+            markers: [
+                { id: "review", text: "Review", date: "2026-04-15", marker_offset: { x: 8, y: -16 } }
             ]
         });
 
@@ -80,7 +111,20 @@
             const add = route("POST", /^\/api\/views\/demo\/timelines$/);
             const timelinePatch = route("PATCH", /^\/api\/views\/demo\/timelines\/([^/]+)$/);
             const remove = route("DELETE", /^\/api\/views\/demo\/timelines\/([^/]+)$/);
-            if (!entry && !viewPatch && !add && !timelinePatch && !remove) return reply(404, { error: "not found" });
+            const addEntry = route("POST", /^\/api\/views\/demo\/timelines\/([^/]+)\/entries$/);
+            const removeEntry = route("DELETE", /^\/api\/views\/demo\/timelines\/([^/]+)\/entries\/([^/]+)$/);
+            const taskPatch = route("PATCH", /^\/api\/views\/demo\/tasks\/([^/]+)$/);
+            const removeTask = route("DELETE", /^\/api\/views\/demo\/tasks\/([^/]+)$/);
+            const addMarker = route("POST", /^\/api\/views\/demo\/markers$/);
+            const markerPatch = route("PATCH", /^\/api\/views\/demo\/markers\/([^/]+)$/);
+            const removeMarker = route("DELETE", /^\/api\/views\/demo\/markers\/([^/]+)$/);
+            const showMarker = route("PUT", /^\/api\/views\/demo\/timelines\/([^/]+)\/markers\/([^/]+)$/);
+            const hideMarker = route("DELETE", /^\/api\/views\/demo\/timelines\/([^/]+)\/markers\/([^/]+)$/);
+            const routes = [entry, viewPatch, add, timelinePatch, remove, addEntry, removeEntry, taskPatch, removeTask,
+                addMarker, markerPatch, removeMarker, showMarker, hideMarker];
+            if (!routes.some(Boolean)) {
+                return reply(404, { error: "not found" });
+            }
 
             if (version !== server.version) return reply(409, server.toData());
             if (document.getElementById("fail").checked) {
@@ -101,9 +145,36 @@
                 } else if (add) {
                     server.addTimeline(body.timeline, body.position);
                     result = { order: order() };
+                } else if (addEntry) {
+                    // `task` is an id, or a new task's data; the rest says where it goes.
+                    const { task, ...place } = body;
+                    const added = server.addEntry(task, timeline.addTargetFromData(id(addEntry), place));
+                    result = { timelines: [timeline.timelineToData(added.timeline)] };
+                } else if (removeEntry) {
+                    const removed = server.removeEntry(id(removeEntry), decodeURIComponent(removeEntry[2]));
+                    result = { timelines: [timeline.timelineToData(removed.timeline)] };
+                } else if (addMarker || markerPatch) {
+                    const marker = addMarker ? server.addMarker(body.marker) : server.updateMarker(id(markerPatch), body).marker;
+                    result = { marker: server.toData().markers.find((m) => String(m.id) === String(marker.id)) };
+                } else if (removeMarker) {
+                    const removed = server.removeMarker(id(removeMarker));
+                    result = { timelines: removed.timelines.map(timeline.timelineToData) };
+                } else if (showMarker || hideMarker) {
+                    const m = showMarker || hideMarker;
+                    const markerId = decodeURIComponent(m[2]);
+                    const changed = showMarker ? server.showMarker(id(m), markerId) : server.hideMarker(id(m), markerId);
+                    result = { timelines: [timeline.timelineToData(changed.timeline)] };
+                } else if (taskPatch) {
+                    const updated = server.updateTask(id(taskPatch), body);
+                    result = { task: server.toData().tasks.find((t) => String(t.id) === String(updated.task.id)) };
+                } else if (removeTask) {
+                    const removed = server.removeTask(id(removeTask));
+                    result = { timelines: removed.timelines.map(timeline.timelineToData) };
                 } else if (timelinePatch) {
-                    if (body.name !== undefined) server.renameTimeline(id(timelinePatch), body.name);
-                    if (body.position !== undefined) server.setTimelinePosition(id(timelinePatch), body.position);
+                    // Name and dates, and/or a new place in the stack.
+                    const { position, ...fields } = body;
+                    if (Object.keys(fields).length) server.updateTimeline(id(timelinePatch), fields);
+                    if (position !== undefined) server.setTimelinePosition(id(timelinePatch), position);
                     result = { order: order() };
                 } else {
                     server.removeTimeline(id(remove));
@@ -126,7 +197,6 @@
         timeline.init("timeline_here", { api_url: "https://example.test/api", fetch: mockFetch });
         timeline.on("move_failed", (e) => write(`move_failed: ${e.error.message}`));
         timeline.on("save_failed", (e) => write(`save_failed (${e.action}): ${e.error.message}`));
-        timeline.load("demo");
 
         // Timeline and view changes. Each one shows at once and is saved in the background.
         const nameField = document.getElementById("name");
@@ -144,8 +214,73 @@
             },
             up: () => selected() !== undefined && timeline.moveTimelineUp(selected()),
             down: () => selected() !== undefined && timeline.moveTimelineDown(selected()),
-            remove: () => selected() !== undefined && timeline.removeTimeline(selected())
+            remove: () => selected() !== undefined && timeline.removeTimeline(selected()),
+            longer: () => {
+                if (selected() === undefined) return;
+                const t = timeline.serialize().timelines.find((x) => x.id === selected());
+                const finish = new Date(t.finish_date.length === 10 ? t.finish_date + "T00:00Z" : t.finish_date);
+                finish.setUTCMonth(finish.getUTCMonth() + 1);
+                return timeline.updateTimeline(selected(), { finish_date: finish.toISOString().slice(0, 10) });
+            },
+            // A new task goes in the same request as its entry.
+            add_entry: () => {
+                if (!name() || selected() === undefined) return;
+                const tasks = timeline.serialize().tasks;
+                while (tasks.some((t) => t.id === `m-${added}`)) added++;
+                const task = { id: `m-${added}`, text: name(), start_date: "2026-04-20" };
+                return timeline.addEntry(task, { timeline_id: selected(), placement: "above" });
+            },
+            remove_entry: () => clicked && timeline.removeEntry(clicked.timelineId, clicked.taskId),
+            rename_task: () => clicked && name() && timeline.updateTask(clicked.taskId, { text: name() }),
+            // Moves the start a week later. With a duration the finish follows (these tasks all have one).
+            later: () => {
+                if (!clicked) return;
+                const task = timeline.serialize().tasks.find((t) => t.id === clicked.taskId);
+                const start = new Date(task.start_date.length === 10 ? task.start_date + "T00:00Z" : task.start_date);
+                start.setUTCDate(start.getUTCDate() + 7);
+                return timeline.updateTask(clicked.taskId, { start_date: start.toISOString().slice(0, 10) });
+            },
+            remove_task: () => clicked && timeline.removeTask(clicked.taskId),
+            // Markers: the one picked in the list, and the selected timeline.
+            add_marker: () => {
+                if (!name()) return;
+                const markers = timeline.serialize().markers ?? [];
+                while (markers.some((m) => m.id === `mk-${added}`)) added++;
+                const id = `mk-${added}`;
+                pickNext = id;
+                return timeline.addMarker({ id, text: name(), date: "2026-05-04" })
+                    .then(() => selected() !== undefined && timeline.showMarker(selected(), id));
+            },
+            rename_marker: () => pickedMarker() && name() && timeline.updateMarker(pickedMarker(), { text: name() }),
+            show_marker: () => pickedMarker() && selected() !== undefined && timeline.showMarker(selected(), pickedMarker()),
+            hide_marker: () => pickedMarker() && selected() !== undefined && timeline.hideMarker(selected(), pickedMarker()),
+            remove_marker: () => pickedMarker() && timeline.removeMarker(pickedMarker())
         };
+
+        // The marker list follows the view's markers.
+        const markerList = document.getElementById("marker");
+        const pickedMarker = () => markerList.value || undefined;
+        let pickNext;
+        const fillMarkers = () => {
+            const current = pickNext ?? markerList.value;
+            pickNext = undefined;
+            markerList.replaceChildren(...(timeline.serialize().markers ?? []).map((m) => new Option(`${m.text} (${m.date})`, m.id)));
+            if ([...markerList.options].some((o) => o.value === current)) markerList.value = current;
+        };
+        // A failed save can bring a marker back (rollback), so refresh then too.
+        for (const eventName of ["marker_added", "marker_updated", "marker_removed", "save_failed"]) timeline.on(eventName, fillMarkers);
+        timeline.load("demo").then(fillMarkers);
+        // The task clicked last, and the timeline it was clicked on.
+        let clicked = null;
+        timeline.attachEvent("onTaskClick", (taskId, e, timelineId) => {
+            clicked = { taskId, timelineId };
+        });
+        timeline.on("entry_removed", () => {
+            clicked = null;
+        });
+        timeline.on("task_removed", () => {
+            clicked = null;
+        });
         // Each call returns a promise that settles when the change is saved. A failure is
         // logged by save_failed above, so the rejection itself can be ignored here.
         for (const [id, action] of Object.entries(actions)) {

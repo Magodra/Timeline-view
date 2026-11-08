@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { formatDate } from "./dates";
 import { MoveError, TimelineModel, lineCount, viewRange } from "./model";
-import type { TaskEntryData, TimelineData, TimelineViewData } from "./types";
+import type {
+  MarkerPatchData,
+  MilestoneSymbol,
+  TaskEntryData,
+  TaskPatchData,
+  TimelineData,
+  TimelineUpdateData,
+  TimelineViewData,
+} from "./types";
 
 function sample(): TimelineViewData {
   return {
@@ -118,7 +126,7 @@ describe("fromData", () => {
     expect(withMarker((d) => (d.markers![0].marker_offset = { x: 0 } as never))).toThrow(/marker_offset/);
     expect(withMarker((d) => d.timelines[0].entries.push({ marker: 9 }))).toThrow(/unknown marker/);
     expect(withMarker((d) => d.timelines[0].entries.push({ marker: 1 }, { marker: 1 }))).toThrow(/more than once/);
-    expect(withMarker((d) => d.timelines[0].entries.push({ marker: 1, line: 0 } as never))).toThrow(/only `marker`/);
+    expect(withMarker((d) => d.timelines[0].entries.push({ marker: 1, line: 0 }))).toThrow(/only `marker`/);
   });
 
   it("keeps a task's color", () => {
@@ -374,5 +382,236 @@ describe("timeline order", () => {
       expect(() => m.setTimelinePosition(2, bad), String(bad)).toThrow(MoveError);
     }
     expect(() => m.setTimelinePosition(9, 0)).toThrow(/not found/);
+  });
+});
+
+describe("removeEntry", () => {
+  it("takes a task off one timeline, trims it, and keeps the task", () => {
+    const m = TimelineModel.fromData(sample());
+    // Timeline 1: task 1 on line 1, 2 and 3 are callouts. Task 1 is also on timeline 2.
+    const { entry, timeline } = m.removeEntry(2, 1);
+    expect(entry).toEqual({ taskId: 1, placement: "above", calloutOffset: { x: 0, y: -16 } });
+    expect(timeline.id).toBe(2);
+    expect(entries(m, 2)).toEqual([]);
+    expect(m.findTask(1)).toBeDefined();
+
+    m.removeEntry(1, 3);
+    expect(entries(m, 1).map((e) => e.task)).toEqual([1, 2]);
+  });
+
+  it("rejects a task that isn't on the timeline, without changing anything", () => {
+    const m = TimelineModel.fromData(sample());
+    const before = m.toData();
+    expect(() => m.removeEntry(2, 3)).toThrow(/not on timeline/);
+    expect(() => m.removeEntry(9, 1)).toThrow(/Timeline 9 not found/);
+    expect(m.toData()).toEqual(before);
+  });
+});
+
+describe("updateTask", () => {
+  const task = (m: TimelineModel, id: number) => m.toData().tasks.find((t) => t.id === id);
+
+  it("changes only the given fields", () => {
+    const m = TimelineModel.fromData(sample());
+    const { task: after, old } = m.updateTask(1, { text: "Renamed", color: "teal" });
+    expect(old.text).toBe("Task #1");
+    expect(after.text).toBe("Renamed");
+    expect(task(m, 1)).toEqual({ id: 1, text: "Renamed", start_date: "2026-04-01", duration: "2d", color: "teal" });
+  });
+
+  it("gives the finish one way: duration replaces finish_date and the other way round", () => {
+    const m = TimelineModel.fromData(sample());
+    m.updateTask(1, { finish_date: "2026-04-10" });
+    expect(task(m, 1)).toEqual({ id: 1, text: "Task #1", start_date: "2026-04-01", finish_date: "2026-04-10" });
+    m.updateTask(1, { duration: "1w" });
+    expect(task(m, 1)).toEqual({ id: 1, text: "Task #1", start_date: "2026-04-01", duration: "1w" });
+    expect(formatDate(m.findTask(1)!.finish)).toBe("2026-04-08");
+  });
+
+  it("clears optional fields with null, and clearing the duration makes a milestone", () => {
+    const m = TimelineModel.fromData(sample());
+    m.updateTask(1, { color: "teal" });
+    m.updateTask(1, { duration: null, color: null });
+    expect(task(m, 1)).toEqual({ id: 1, text: "Task #1", start_date: "2026-04-01" });
+    expect(m.findTask(1)!.isMilestone).toBe(true);
+    m.updateTask(2, { symbol: "star" });
+    expect(task(m, 2)!.symbol).toBe("star");
+  });
+
+  it("moves the start, keeping the duration", () => {
+    const m = TimelineModel.fromData(sample());
+    m.updateTask(1, { start_date: "2026-04-20T09:00:00Z" });
+    expect(m.findTask(1)!.finish.toISOString()).toBe("2026-04-22T09:00:00.000Z");
+    expect(task(m, 1)!.start_date).toBe("2026-04-20T09:00:00Z");
+  });
+
+  it("rejects bad patches without changing anything", () => {
+    const cases: [number, unknown, string][] = [
+      [9, { text: "x" }, "not_found"],
+      [1, { duration: "2d", finish_date: "2026-04-05" }, "invalid"],
+      [1, { finish_date: "2026-03-01" }, "invalid"], // before the start
+      [1, { start_date: "nope" }, "invalid"],
+      [1, { start_date: null }, "invalid"],
+      [1, { duration: "2 days" }, "invalid"],
+      [1, { color: "not a color;" }, "invalid"],
+      [1, { symbol: "hexagon" }, "invalid"],
+      [1, { text: 5 }, "invalid"],
+      [1, { id: 7 }, "invalid"],
+      [1, null, "invalid"],
+    ];
+    for (const [id, patch, code] of cases) {
+      const m = TimelineModel.fromData(sample());
+      const before = m.toData();
+      expect(() => m.updateTask(id, patch as TaskPatchData), JSON.stringify(patch)).toThrow(MoveError);
+      try {
+        m.updateTask(id, patch as TaskPatchData);
+      } catch (error) {
+        expect((error as MoveError).code, JSON.stringify(patch)).toBe(code);
+      }
+      expect(m.toData()).toEqual(before);
+    }
+  });
+});
+
+describe("editing markers", () => {
+  const withMarkers = () => {
+    const data = sample();
+    data.markers = [{ id: "m", text: "Kick-off", date: "2026-03-10", marker_offset: { x: 0, y: -16 } }];
+    data.timelines[0].entries.push({ marker: "m" });
+    return TimelineModel.fromData(data);
+  };
+
+  it("adds a marker, validated as loaded data", () => {
+    const m = withMarkers();
+    m.addMarker({ id: "g", text: "Today", date: "2026-04-01T12:00:00Z", global: true });
+    expect(m.toData().markers![1]).toEqual({
+      id: "g",
+      text: "Today",
+      date: "2026-04-01T12:00:00Z",
+      global: true,
+      marker_offset: { x: 0, y: -16 },
+    });
+    expect(() => m.addMarker({ id: "g", text: "Dup", date: "2026-04-01" })).toThrow(/already exists/);
+    expect(() => m.addMarker({ id: "x", text: "Bad", date: "soon" })).toThrow(MoveError);
+    expect(m.markers).toHaveLength(2);
+  });
+
+  it("updates only the given fields, and clears the color with null", () => {
+    const m = withMarkers();
+    m.updateMarker("m", { text: "Start", color: "green", marker_offset: { x: 5, y: 20 } });
+    expect(m.toData().markers![0]).toEqual({
+      id: "m",
+      text: "Start",
+      date: "2026-03-10",
+      color: "green",
+      marker_offset: { x: 5, y: 20 },
+    });
+    m.updateMarker("m", { color: null, global: true });
+    expect(m.toData().markers![0]).toEqual({
+      id: "m",
+      text: "Start",
+      date: "2026-03-10",
+      global: true,
+      marker_offset: { x: 5, y: 20 },
+    });
+  });
+
+  it("rejects bad marker patches without changing anything", () => {
+    const cases: [string, unknown][] = [
+      ["nope", { text: "x" }],
+      ["m", { date: "soon" }],
+      ["m", { color: "nope;" }],
+      ["m", { global: "yes" }],
+      ["m", { marker_offset: { x: 1 } }],
+      ["m", { text: 3 }],
+      ["m", { id: "other" }],
+    ];
+    for (const [id, patch] of cases) {
+      const m = withMarkers();
+      const before = m.toData();
+      expect(() => m.updateMarker(id, patch as MarkerPatchData), JSON.stringify(patch)).toThrow(MoveError);
+      expect(m.toData()).toEqual(before);
+    }
+  });
+
+  it("removes a marker and its entries", () => {
+    const m = withMarkers();
+    const { timelines } = m.removeMarker("m");
+    expect(timelines.map((t) => t.id)).toEqual([1]);
+    expect(m.toData().markers).toBeUndefined();
+    expect(m.toData().timelines[0].entries.some((e) => "marker" in e)).toBe(false);
+  });
+
+  it("shows and hides a marker on a timeline", () => {
+    const m = withMarkers();
+    expect(m.showMarker(2, "m").changed).toBe(true);
+    expect(m.showMarker(2, "m").changed).toBe(false); // already there
+    expect(m.toData().timelines[1].entries).toContainEqual({ marker: "m" });
+    m.hideMarker(2, "m");
+    expect(m.toData().timelines[1].entries).not.toContainEqual({ marker: "m" });
+    expect(() => m.hideMarker(2, "m")).toThrow(/not on timeline/);
+    expect(() => m.showMarker(2, "nope")).toThrow(/not found/);
+  });
+});
+
+describe("milestone symbols", () => {
+  it("accepts the five symbols, on a task and as the view's default", () => {
+    for (const symbol of ["diamond", "circle", "square", "triangle", "star"] as const) {
+      const data = sample();
+      data.view.milestone_symbol = symbol;
+      data.tasks[1].symbol = symbol;
+      expect(() => TimelineModel.fromData(data), symbol).not.toThrow();
+    }
+  });
+
+  it("rejects an unknown symbol in parse(), naming the valid ones", () => {
+    const task = sample();
+    task.tasks[1].symbol = "hexagon" as MilestoneSymbol;
+    expect(() => TimelineModel.fromData(task)).toThrow('Task 2: unknown symbol "hexagon": use diamond, circle, square, triangle or star');
+
+    const view = sample();
+    view.view.milestone_symbol = "Diamond" as MilestoneSymbol; // case matters
+    expect(() => TimelineModel.fromData(view)).toThrow(/Unknown view\.milestone_symbol "Diamond"/);
+  });
+
+  it("rejects an unknown symbol in a new task for addEntry, and in updateTask", () => {
+    const m = TimelineModel.fromData(sample());
+    const newTask = { id: 9, text: "New", start_date: "2026-04-20", symbol: "hexagon" as MilestoneSymbol };
+    expect(() => m.addEntry(newTask, { timelineId: 2 })).toThrow(/unknown symbol "hexagon"/);
+    expect(() => m.updateTask(2, { symbol: "hexagon" as MilestoneSymbol })).toThrow(/unknown symbol "hexagon"/);
+    expect(m.findTask(9)).toBeUndefined();
+    expect(m.findTask(2)!.symbol).toBeUndefined();
+  });
+});
+
+describe("updateTimeline", () => {
+  it("changes the name and dates given, and keeps entries outside the new range", () => {
+    const m = TimelineModel.fromData(sample());
+    const { old } = m.updateTimeline(1, { finish_date: "2026-04-05T12:00:00Z" });
+    expect(formatDate(old.finish)).toBe("2026-05-01");
+    const data = m.toData().timelines[0];
+    expect([data.name, data.start_date, data.finish_date]).toEqual(["Project", "2026-03-01", "2026-04-05T12:00:00Z"]);
+    // Task 2 (2026-04-10) is now past the finish; its entry stays.
+    expect(entry(m, 1, 2)).toEqual({ task: 2, callout_offset: { x: 30, y: 16 } });
+    m.updateTimeline(1, { name: "Main", start_date: "2026-02-01" });
+    expect(m.toData().timelines[0]).toMatchObject({ name: "Main", start_date: "2026-02-01" });
+  });
+
+  it("rejects bad changes without changing anything", () => {
+    const cases: [number, unknown][] = [
+      [9, { name: "x" }],
+      [1, { finish_date: "2026-03-01" }], // not after the start
+      [1, { start_date: "2026-06-01" }], // after the finish
+      [1, { start_date: "soon" }],
+      [1, { name: 3 }],
+      [1, { position: 0 }],
+      [1, null],
+    ];
+    for (const [id, patch] of cases) {
+      const m = TimelineModel.fromData(sample());
+      const before = m.toData();
+      expect(() => m.updateTimeline(id, patch as TimelineUpdateData), JSON.stringify(patch)).toThrow(MoveError);
+      expect(m.toData()).toEqual(before);
+    }
   });
 });
