@@ -1,5 +1,5 @@
 import "./styles.css";
-import type { EntryTargetData, Id, MovePatchData, Offset, TaskData, TimelineViewData } from "./types";
+import type { EntryTargetData, Id, MovePatchData, Offset, TaskData, TimelineData, TimelineViewData } from "./types";
 import {
   TimelineView,
   type TimelineEventName,
@@ -20,6 +20,9 @@ export {
   type EntryMovedEvent,
   type MarkerMovedEvent,
   type MoveFailedEvent,
+  type SaveAction,
+  type SaveFailedEvent,
+  type TimelineAddedEvent,
   type TaskRemovedEvent,
   type TimelineMovedEvent,
   type TimelineRemovedEvent,
@@ -74,6 +77,8 @@ export const moveTimelineDown = (id: Id) => instance().moveTimelineDown(id);
 export const moveTimeline = (id: Id, delta: number) => instance().moveTimeline(id, delta);
 export const removeTask = (id: Id) => instance().removeTask(id);
 export const removeTimeline = (id: Id) => instance().removeTimeline(id);
+export const addTimeline = (data: TimelineData, position?: number) => instance().addTimeline(data, position);
+export const whenSaved = () => instance().whenSaved();
 export const renameView = (name: string) => instance().renameView(name);
 export const renameTimeline = (id: Id, name: string) => instance().renameTimeline(id, name);
 export const on = <K extends keyof TimelineEvents>(name: K, handler: (event: TimelineEvents[K]) => void) =>

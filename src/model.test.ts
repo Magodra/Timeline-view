@@ -363,3 +363,16 @@ describe("addEntry", () => {
     }
   });
 });
+
+describe("timeline order", () => {
+  it("puts a timeline at a position, and rejects positions out of range", () => {
+    const m = TimelineModel.fromData(sample());
+    expect(m.setTimelinePosition(2, 0)).toBe(true);
+    expect(m.timelines.map((t) => t.id)).toEqual([2, 1]);
+    expect(m.setTimelinePosition(2, 0)).toBe(false); // already there
+    for (const bad of [-1, 2, 0.5]) {
+      expect(() => m.setTimelinePosition(2, bad), String(bad)).toThrow(MoveError);
+    }
+    expect(() => m.setTimelinePosition(9, 0)).toThrow(/not found/);
+  });
+});

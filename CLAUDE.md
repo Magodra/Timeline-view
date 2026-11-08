@@ -4,7 +4,7 @@
 
 A web-based timeline component that other applications embed to display and edit timelines.
 
-**Status:** early version. Rendering, drag and drop of entries, and the REST move API work. See [Not built yet](#not-built-yet). Items marked **TBD** are open decisions; ask before settling one.
+**Status:** early version. Rendering, drag and drop of entries, and the REST API for moves and for view and timeline changes work. See [Not built yet](#not-built-yet). Items marked **TBD** are open decisions; ask before settling one.
 
 ## Commands
 
@@ -129,10 +129,9 @@ Duration format: a whole number plus a unit: `h` (hours), `d` (days), `w` (weeks
 
 ### Not built yet
 
-- Adding timelines. Today they come only from the data. Renaming (`renameView`, `renameTimeline`), reordering (`moveTimelineUp`/`moveTimelineDown`) and removing (`removeTimeline`, `removeTask`) work through the API, with the host supplying the buttons, but there are no REST calls to save them (**TBD**).
 - Editing a task's dates or duration by dragging or resizing.
 - Keyboard and screen-reader support for moving entries.
-- REST endpoints for creating and editing tasks and timelines, and for adding entries (`addEntry` only fires `entry_added`) (**TBD**).
+- REST endpoints for tasks (creating, editing, `removeTask`), for adding entries (`addEntry` only fires `entry_added`), for timeline dates, and for markers (**TBD**). Timelines and the view's name are saved (see [REST API](#rest-api)); the UI for those changes is the host's (buttons calling the API).
 
 ## Data format
 
@@ -184,7 +183,7 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
 | `timeline.resize()` | Lays the view out again for its container's size, without rebuilding it. Automatic on size changes and when a hidden view is shown; for hosts that want to call it themselves (for example from a docking library's resize callback). |
 | `timeline.toSVG()` | Returns the view as a standalone SVG document (a string), as it looks on screen. The view must be rendered and visible. Saving it is up to the host page; see [examples/export.html](examples/export.html). |
 | `timeline.moveEntry(timeline_id, task_id, patch)` | Moves an entry, as a drop does. Takes the PATCH body below, without `version`. |
-| `timeline.on("entry_moved" \| "move_failed" \| "marker_moved" \| "entry_added" \| "timeline_moved" \| "task_removed" \| "timeline_removed" \| "view_renamed" \| "timeline_renamed", handler)` | Subscribes to move events. Returns an unsubscribe function. `marker_moved` gets `{ marker_id, marker_offset }`; `entry_added` gets `{ timeline_id, task_id, task, new_task, entry, timeline }` (`timeline`: its full data after the add); `timeline_moved` gets `{ timeline_id, from_index, to_index, order }` (0-based positions; `order`: all timeline ids, top to bottom); `task_removed` gets `{ task_id, task, timelines }` (the timelines it was on, after); `timeline_removed` gets `{ timeline_id, timeline, index, order }` (`index`: its position before; `order`: the rest); `view_renamed` gets `{ name, old_name }`; `timeline_renamed` gets `{ timeline_id, name, old_name }`. |
+| `timeline.on("entry_moved" \| "move_failed" \| "marker_moved" \| "entry_added" \| "timeline_moved" \| "task_removed" \| "timeline_removed" \| "view_renamed" \| "timeline_renamed" \| "timeline_added" \| "save_failed", handler)` | Subscribes to change events. Returns an unsubscribe function. `marker_moved` gets `{ marker_id, marker_offset }`; `entry_added` gets `{ timeline_id, task_id, task, new_task, entry, timeline }` (`timeline`: its full data after the add); `timeline_moved` gets `{ timeline_id, from_index, to_index, order }` (0-based positions; `order`: all timeline ids, top to bottom); `task_removed` gets `{ task_id, task, timelines }` (the timelines it was on, after); `timeline_removed` gets `{ timeline_id, timeline, index, order }` (`index`: its position before; `order`: the rest); `view_renamed` gets `{ name, old_name }`; `timeline_renamed` gets `{ timeline_id, name, old_name }`; `timeline_added` gets `{ timeline_id, timeline, index, order }`; `save_failed` gets `{ action, timeline_id?, error }` (`action`: `rename_view`, `add_timeline`, `rename_timeline`, `move_timeline` or `remove_timeline`), after the view was rolled back (or re-rendered from a 409). |
 | `timeline.targetAt(x, y, task?)` | Hit test in client coordinates: the drop target `{ timeline_id, placement, line?, new_line?, callout_offset? }` at the point, or `null` outside the view. `task` (id or new task data) gives callout targets an offset. |
 | `timeline.highlightTarget(target \| null)` | Highlights a drop target as internal drags do, or removes the highlight. Returns `false` if the target isn't in the view. |
 | `timeline.addEntry(task, target)` | Adds a task (an existing id, or new task data, which is added to `tasks`) at a target, following the move rules; without `placement`, a `callout_offset` makes a callout, otherwise the bar (`line` default 0). Fires `entry_added`. Throws a `MoveError` (`not_found`, `conflict`, `invalid`) without changing anything. Not sent to the REST API (**TBD**). |
@@ -193,10 +192,12 @@ Input to `parse()`, output of `serialize()`. See [examples/basic.html](examples/
 | `timeline.selectTask(id, add?)`, `selectTimeline(id, add?)` | Selects only this item, or with `add` adds it to the selection (same kind only). Return `false` when `view.selection` is off. |
 | `timeline.unselectTask(id)`, `unselectTimeline(id)`, `clearSelection()` | Deselects one item, or everything. |
 | `timeline.getSelectedTasks()`, `getSelectedTimelines()` | The selected ids, in the order they were selected; `[]` when the other kind (or nothing) is selected. |
-| `timeline.moveTimelineUp(id)`, `moveTimelineDown(id)`, `moveTimeline(id, delta)` | Reorders the timelines and fires `timeline_moved`. Return `false` at the top or bottom, without the event. Not sent to the REST API. |
-| `timeline.renameView(name)`, `renameTimeline(id, name)` | Changes the view's name (the heading; `""` for none) or a timeline's name, and fires `view_renamed` / `timeline_renamed`. Return `false`, without the event, when the name is unchanged. Throw a `MoveError` for an unknown timeline (`not_found`) or a non-string name (`invalid`). Not sent to the REST API. |
+| `timeline.moveTimelineUp(id)`, `moveTimelineDown(id)`, `moveTimeline(id, delta)` | Reorders the timelines and fires `timeline_moved`. Return a promise, like the other view and timeline changes below: it resolves to `true` once saved (at once without `api_url`), or `false` at the top or bottom, without the event. With `api_url`, saved with `PATCH .../timelines/{id}` `{ position }`. |
+| `timeline.renameView(name)`, `renameTimeline(id, name)` | Changes the view's name (the heading; `""` for none) or a timeline's name, and fires `view_renamed` / `timeline_renamed`. The promise resolves to `true` once saved, or `false`, without the event, when the name is unchanged. Rejects with a `MoveError` for an unknown timeline (`not_found`) or a non-string name (`invalid`). With `api_url`, saved with `PATCH /views/{id}` or `PATCH .../timelines/{id}` `{ name }`. |
 | `timeline.removeTask(id)` | Removes a task from `tasks` and from every timeline (their lines are trimmed as after a move). Deselects it, fires `task_removed`. Throws a `MoveError` (`not_found`) for an unknown id. Not sent to the REST API. |
-| `timeline.removeTimeline(id)` | Removes a timeline and its entries; its tasks stay, also those on no other timeline. Deselects it, fires `timeline_removed`. Throws a `MoveError` (`not_found`) for an unknown id. Not sent to the REST API. |
+| `timeline.removeTimeline(id)` | Removes a timeline and its entries; its tasks stay, also those on no other timeline. Deselects it, fires `timeline_removed`. The promise resolves once saved; rejects with a `MoveError` (`not_found`) for an unknown id. With `api_url`, saved with `DELETE .../timelines/{id}`. |
+| `timeline.addTimeline(data, position?)` | Adds a timeline in the data format (`entries` optional) at a 0-based position, the bottom by default; validated as `parse()` would. Fires `timeline_added`. The promise resolves once saved; rejects with a `MoveError` (`conflict` for an id in use, `invalid`) without changing anything. With `api_url`, saved with `POST .../timelines`. |
+| `timeline.whenSaved()` | A promise that resolves when every change so far has been answered by the REST API (or failed; failures go to `move_failed` / `save_failed`). At once without `api_url`. |
 | `timeline.detachEvent(event_id)` | Removes a handler added with `attachEvent`. Returns `false` for an unknown id. |
 | `new timeline.TimelineView(container, options)` | Separate instance, for more than one view on a page. Same methods. |
 
@@ -247,3 +248,18 @@ Client behavior:
 - Requests are sent one at a time, in order.
 - On 409 the view re-renders from the response body. On any other error it rolls back to the state before the move and fires `move_failed`.
 - Moves queued behind a failed one are cancelled and rolled back with it.
+
+### View and timeline changes
+
+Renaming the view, and adding, renaming, reordering and removing timelines, are saved with these calls. Each body carries `version` like the move (for `DELETE`, as a query parameter), and each **200** returns the new `version`:
+
+| Call | Body | 200 returns | Sent by |
+|------|------|-------------|---------|
+| `PATCH /views/{view_id}` | `{ "name": "Roadmap" }` | `{ version, view }` | `renameView` |
+| `POST /views/{view_id}/timelines` | `{ "timeline": { id, name, start_date, finish_date, entries }, "position": 2 }` | `{ version, order }` | `addTimeline` |
+| `PATCH /views/{view_id}/timelines/{timeline_id}` | `{ "name": "Team B" }` or `{ "position": 0 }` (send only what changes) | `{ version, order }` | `renameTimeline`, `moveTimeline*` |
+| `DELETE /views/{view_id}/timelines/{timeline_id}?version=7` | none | `{ version, order }` | `removeTimeline` |
+
+`position` is the timeline's 0-based index in the stack after the change; `order` lists every timeline's id, top to bottom. **404**: unknown view or timeline. **409**: stale `version` (or, for `POST`, a timeline id in use), with the current view as the body. **422**: a name that isn't a string, a position out of range, or invalid timeline data (as `parse()` would reject it).
+
+These share the moves' queue (`save` in `view.ts`): applied at once, sent one at a time in the order made, rolled back on error together with everything queued after them, re-rendered from the body on 409. They report failures with `save_failed` instead of `move_failed`. Like `moveEntry`, each method applies the change at once and returns a promise that settles when it is saved: it rejects after a failed save (with the `ApiError`, or `MoveCancelledError` for a change cancelled behind a failed one), and for invalid input (`MoveError`, nothing changed). `whenSaved()` waits for everything queued. The mock server in `examples/rest.html` implements all of them with the model (`renameView`, `addTimeline`, `renameTimeline`, `setTimelinePosition`, `removeTimeline`).

@@ -161,6 +161,31 @@ export interface EntryTargetData {
   callout_offset?: Offset;
 }
 
+/** Body of `PATCH /views/{view_id}`, minus `version`. */
+export interface ViewPatchData {
+  name?: string;
+}
+
+/** Response of a successful `PATCH /views/{view_id}`. */
+export interface ViewResultData {
+  version: number;
+  view: ViewData;
+}
+
+/** Body of `PATCH /views/{view_id}/timelines/{timeline_id}`, minus `version`. Send only what changes. */
+export interface TimelinePatchData {
+  name?: string;
+  /** The timeline's 0-based index in the stack after the move. */
+  position?: number;
+}
+
+/** Response of a successful timeline add, update or removal: the new version and the timelines' order. */
+export interface OrderResultData {
+  version: number;
+  /** Every timeline's id, top to bottom. */
+  order: Id[];
+}
+
 /** Response of a successful move. */
 export interface MoveResultData {
   version: number;

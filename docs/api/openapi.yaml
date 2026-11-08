@@ -23,6 +23,129 @@ paths:
               schema: { $ref: "#/components/schemas/TimelineViewData" }
         "404":
           $ref: "#/components/responses/NotFound"
+    patch:
+      summary: Rename the view
+      operationId: updateView
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ViewPatch" }
+            example: { name: "Roadmap", version: 7 }
+      responses:
+        "200":
+          description: Renamed. Returns the view's settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ViewResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          description: "`name` isn't a string."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /views/{view_id}/timelines:
+    parameters:
+      - $ref: "#/components/parameters/ViewId"
+    post:
+      summary: Add a timeline
+      operationId: addTimeline
+      description: |
+        Adds a timeline at `position` in the stack (0-based; equal to the
+        number of timelines for the bottom). Its entries follow the same rules
+        as in a loaded view: they may only name tasks the view has.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddTimeline" }
+            example:
+              timeline: { id: 3, name: "Team C", start_date: "2026-03-01", finish_date: "2026-06-01", entries: [] }
+              position: 2
+              version: 7
+      responses:
+        "200":
+          description: Added. Returns the new version and the timelines' order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            `version` is stale, or a timeline with this id exists. The body is
+            the current view; the client re-renders from it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TimelineViewData" }
+        "422":
+          description: |
+            Invalid timeline (bad or missing dates, finish not after start, an
+            entry for an unknown task, ...) or `position` out of range.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /views/{view_id}/timelines/{timeline_id}:
+    parameters:
+      - $ref: "#/components/parameters/ViewId"
+      - name: timeline_id
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+    patch:
+      summary: Rename a timeline, or move it in the stack
+      operationId: updateTimeline
+      description: |
+        Send only the fields that change. `position` is the timeline's 0-based
+        index in the stack after the move. The client sends one request per
+        rename and per move (`moveTimelineUp`/`moveTimelineDown`), in order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TimelinePatch" }
+            example: { position: 0, version: 7 }
+      responses:
+        "200":
+          description: Updated. Returns the new version and the timelines' order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          description: "`name` isn't a string, or `position` is out of range (0 to the number of timelines - 1)."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      summary: Remove a timeline
+      operationId: removeTimeline
+      description: |
+        Removes the timeline and its entries. Its tasks stay in the view, also
+        those that are on no other timeline now.
+      parameters:
+        - name: version
+          in: query
+          description: The view version the client last saw.
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Removed. Returns the new version and the remaining timelines' order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderResult" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /views/{view_id}/timelines/{timeline_id}/entries/{task_id}:
     parameters:
@@ -97,6 +220,13 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: |
+        `version` is stale: the view changed since the client last saw it. The
+        body is the current view; the client re-renders from it.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/TimelineViewData" }
 
   schemas:
     Id:
@@ -322,6 +452,44 @@ components:
         timelines:
           type: array
           items: { $ref: "#/components/schemas/Timeline" }
+
+    ViewPatch:
+      type: object
+      properties:
+        name: { type: string, description: 'The heading; "" for none.' }
+        version: { type: integer, description: The view version the client last saw. }
+
+    ViewResult:
+      type: object
+      required: [version, view]
+      properties:
+        version: { type: integer }
+        view: { $ref: "#/components/schemas/View" }
+
+    AddTimeline:
+      type: object
+      required: [timeline, position]
+      properties:
+        timeline: { $ref: "#/components/schemas/Timeline" }
+        position: { type: integer, minimum: 0, description: 0-based place in the stack. }
+        version: { type: integer, description: The view version the client last saw. }
+
+    TimelinePatch:
+      type: object
+      properties:
+        name: { type: string }
+        position: { type: integer, minimum: 0, description: 0-based index in the stack after the move. }
+        version: { type: integer, description: The view version the client last saw. }
+
+    OrderResult:
+      type: object
+      required: [version, order]
+      properties:
+        version: { type: integer }
+        order:
+          type: array
+          description: Every timeline's id, top to bottom.
+          items: { $ref: "#/components/schemas/Id" }
 
     Error:
       type: object

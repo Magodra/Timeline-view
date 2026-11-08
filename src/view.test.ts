@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TaskEntryData, TimelineViewData } from "./types";
+import type { TaskEntryData, TimelineData, TimelineViewData } from "./types";
 import { TimelineView, type MoveFailedEvent } from "./view";
 
 function sample(): TimelineViewData {
@@ -318,15 +318,15 @@ describe("moving timelines", () => {
   };
   const order = () => [...container.querySelectorAll<HTMLElement>(".tlv-timeline")].map((n) => n.dataset.timeline);
 
-  it("moves a timeline up and down the stack, keeping its selection", () => {
+  it("moves a timeline up and down the stack, keeping its selection", async () => {
     const view = new TimelineView("tl");
     view.parse(three());
     view.selectTimeline(2);
-    expect(view.moveTimelineUp(2)).toBe(true);
+    await expect(view.moveTimelineUp(2)).resolves.toBe(true);
     expect(order()).toEqual(["2", "1", "3"]);
-    expect(view.moveTimelineUp(2)).toBe(false);
-    expect(view.moveTimelineDown(1)).toBe(true);
-    expect(view.moveTimelineDown(1)).toBe(false);
+    await expect(view.moveTimelineUp(2)).resolves.toBe(false);
+    await expect(view.moveTimelineDown(1)).resolves.toBe(true);
+    await expect(view.moveTimelineDown(1)).resolves.toBe(false);
     expect(order()).toEqual(["2", "3", "1"]);
     expect(view.serialize().timelines.map((t) => t.id)).toEqual([2, 3, 1]);
     expect(container.querySelector(".tlv-timeline--selected")!.getAttribute("data-timeline")).toBe("2");
@@ -346,10 +346,10 @@ describe("moving timelines", () => {
     ]);
   });
 
-  it("throws for an unknown timeline", () => {
+  it("throws for an unknown timeline", async () => {
     const view = new TimelineView("tl");
     view.parse(three());
-    expect(() => view.moveTimelineUp(9)).toThrow(/not found/);
+    await expect(view.moveTimelineUp(9)).rejects.toThrow(/not found/);
   });
 });
 
@@ -796,28 +796,28 @@ describe("removing tasks and timelines", () => {
     expect(events.at(-1)).toMatchObject({ timeline_id: 2, index: 0, order: [] });
   });
 
-  it("throws for an unknown id, without an event", () => {
+  it("throws for an unknown id, without an event", async () => {
     const view = new TimelineView("tl");
     view.parse(two());
     const handler = vi.fn();
     view.on("task_removed", handler);
     view.on("timeline_removed", handler);
     expect(() => view.removeTask(9)).toThrow(/not found/);
-    expect(() => view.removeTimeline(9)).toThrow(/not found/);
+    await expect(view.removeTimeline(9)).rejects.toThrow(/not found/);
     expect(handler).not.toHaveBeenCalled();
   });
 });
 
 describe("renaming", () => {
-  it("renames the view, updates the heading and fires view_renamed", () => {
+  it("renames the view, updates the heading and fires view_renamed", async () => {
     const view = new TimelineView("tl");
     view.parse(sample());
     const events: unknown[] = [];
     view.on("view_renamed", (e) => events.push(e));
-    expect(view.renameView("Plan")).toBe(true);
+    await expect(view.renameView("Plan")).resolves.toBe(true);
     expect(container.querySelector(".tlv-title")!.textContent).toBe("Plan");
-    expect(view.renameView("Plan")).toBe(false); // unchanged: no event
-    expect(view.renameView("")).toBe(true);
+    await expect(view.renameView("Plan")).resolves.toBe(false); // unchanged: no event
+    await expect(view.renameView("")).resolves.toBe(true);
     expect(container.querySelector(".tlv-title")).toBeNull();
     expect(view.serialize().view.name).toBe("");
     expect(events).toEqual([
@@ -826,27 +826,27 @@ describe("renaming", () => {
     ]);
   });
 
-  it("renames a timeline and fires timeline_renamed", () => {
+  it("renames a timeline and fires timeline_renamed", async () => {
     const view = new TimelineView("tl");
     view.parse(sample());
     view.selectTimeline(1);
     const events: unknown[] = [];
     view.on("timeline_renamed", (e) => events.push(e));
-    expect(view.renameTimeline(1, "Main")).toBe(true);
+    await expect(view.renameTimeline(1, "Main")).resolves.toBe(true);
     expect(container.querySelector(".tlv-name")!.textContent).toBe("Main");
     expect(container.querySelector(".tlv-timeline")!.getAttribute("aria-label")).toBe("Main");
     expect(view.getSelectedTimelines()).toEqual([1]);
-    expect(view.renameTimeline("1", "Main")).toBe(false);
+    await expect(view.renameTimeline("1", "Main")).resolves.toBe(false);
     expect(view.serialize().timelines[0].name).toBe("Main");
     expect(events).toEqual([{ timeline_id: 1, name: "Main", old_name: "Project" }]);
   });
 
-  it("throws for an unknown timeline or a name that isn't a string", () => {
+  it("throws for an unknown timeline or a name that isn't a string", async () => {
     const view = new TimelineView("tl");
     view.parse(sample());
-    expect(() => view.renameTimeline(9, "X")).toThrow(/not found/);
-    expect(() => view.renameTimeline(1, 5 as unknown as string)).toThrow(/string/);
-    expect(() => view.renameView(null as unknown as string)).toThrow(/string/);
+    await expect(view.renameTimeline(9, "X")).rejects.toThrow(/not found/);
+    await expect(view.renameTimeline(1, 5 as unknown as string)).rejects.toThrow(/string/);
+    await expect(view.renameView(null as unknown as string)).rejects.toThrow(/string/);
   });
 });
 
@@ -933,5 +933,141 @@ describe("resizing", () => {
     container.getClientRects = () => [] as unknown as DOMRectList; // display: none
     view.resize();
     expect(shown().every(Boolean)).toBe(true);
+  });
+});
+
+describe("timeline and view changes with a REST backend", () => {
+  /** sample() plus an empty timeline 2. */
+  const two = (): TimelineViewData => {
+    const data = sample();
+    data.timelines.push({ id: 2, name: "Two", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] });
+    return data;
+  };
+  const requests = (fetch: ReturnType<typeof vi.fn>) =>
+    (fetch.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [
+      init.method,
+      url.replace("https://api.test", ""),
+      init.body === undefined ? undefined : JSON.parse(init.body as string),
+    ]);
+
+  it("saves renames, moves, adds and removals in order, each with the latest version", async () => {
+    let version = 7;
+    const fetch = vi.fn(async () => json(200, { version: ++version, order: [], view: {} }));
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(two());
+
+    // Made one after another without waiting; each promise settles when its own request is answered.
+    const changes = [
+      view.renameView("Plan"),
+      view.renameTimeline(2, "Second"),
+      view.moveTimelineUp(2),
+      view.addTimeline({ id: 3, name: "Three", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] }, 1),
+      view.removeTimeline(1),
+    ];
+    await expect(Promise.all(changes)).resolves.toEqual([true, true, true, undefined, undefined]);
+
+    expect(requests(fetch)).toEqual([
+      ["PATCH", "/views/v1", { name: "Plan", version: 7 }],
+      ["PATCH", "/views/v1/timelines/2", { name: "Second", version: 8 }],
+      ["PATCH", "/views/v1/timelines/2", { position: 0, version: 9 }],
+      [
+        "POST",
+        "/views/v1/timelines",
+        {
+          timeline: { id: 3, name: "Three", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] },
+          position: 1,
+          version: 10,
+        },
+      ],
+      ["DELETE", "/views/v1/timelines/1?version=11", undefined],
+    ]);
+    const data = view.serialize();
+    expect(data.version).toBe(12);
+    expect(data.view.name).toBe("Plan");
+    expect(data.timelines.map((t) => [t.id, t.name])).toEqual([
+      [2, "Second"],
+      [3, "Three"],
+    ]);
+  });
+
+  it("rolls back a rejected change and the ones queued behind it, and fires save_failed", async () => {
+    const fetch = vi.fn(async () => json(500, { error: "down" }));
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(two());
+    const failed = vi.fn();
+    view.on("save_failed", failed);
+
+    const rename = view.renameTimeline(1, "Renamed");
+    const removal = view.removeTimeline(2);
+    expect(view.serialize().timelines.map((t) => t.name)).toEqual(["Renamed"]); // shown at once
+    await expect(rename).rejects.toMatchObject({ status: 500 });
+    await expect(removal).rejects.toThrow("cancelled");
+
+    expect(fetch).toHaveBeenCalledOnce(); // the removal was cancelled, not sent
+    expect(view.serialize().timelines.map((t) => t.name)).toEqual(["Project", "Two"]);
+    expect(failed).toHaveBeenCalledOnce();
+    expect(failed.mock.calls[0][0]).toMatchObject({ action: "rename_timeline", timeline_id: 1, error: { status: 500 } });
+  });
+
+  it("re-renders from the server's view on 409", async () => {
+    const current = two();
+    current.version = 9;
+    current.view.name = "Changed elsewhere";
+    const fetch = vi.fn(async () => json(409, current));
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(two());
+    view.on("save_failed", () => undefined);
+
+    await expect(view.renameView("Mine")).rejects.toMatchObject({ status: 409 });
+    expect(view.serialize().version).toBe(9);
+    expect(container.querySelector(".tlv-title")!.textContent).toBe("Changed elsewhere");
+  });
+
+  it("sends nothing for a change that doesn't happen", async () => {
+    const fetch = vi.fn();
+    const view = new TimelineView("tl", { api_url: "https://api.test", fetch });
+    view.parse(two());
+    view.renameView("Example"); // unchanged
+    view.moveTimelineUp(1); // already at the top
+    await expect(view.addTimeline({ id: 1, name: "Dup", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] })).rejects.toThrow(
+      /already exists/,
+    );
+    await view.whenSaved();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("addTimeline", () => {
+  it("adds a timeline at the bottom or at a position, and fires timeline_added", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const events: unknown[] = [];
+    view.on("timeline_added", (e) => events.push(e));
+
+    view.addTimeline({ id: 2, name: "Two", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] });
+    // Entries may be left out; entries for known tasks are allowed.
+    view.addTimeline({ id: 3, name: "Three", start_date: "2026-04-01", finish_date: "2026-06-01" } as TimelineData, 0);
+    view.addTimeline({ id: 4, name: "Four", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [{ task: 1, line: 3 }] }, 1);
+
+    expect([...container.querySelectorAll<HTMLElement>(".tlv-timeline")].map((n) => n.dataset.timeline)).toEqual(["3", "4", "1", "2"]);
+    expect(view.serialize().timelines[1].entries).toEqual([{ task: 1, line: 0 }]); // trimmed
+    expect(events[1]).toEqual({
+      timeline_id: 3,
+      timeline: { id: 3, name: "Three", start_date: "2026-04-01", finish_date: "2026-06-01", entries: [] },
+      index: 0,
+      order: [3, 1, 2],
+    });
+  });
+
+  it("rejects bad timelines without changing anything", async () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const before = view.serialize();
+    const ok = { id: 2, name: "Two", start_date: "2026-03-01", finish_date: "2026-05-01", entries: [] };
+    await expect(view.addTimeline({ ...ok, id: 1 })).rejects.toThrow(/already exists/);
+    await expect(view.addTimeline({ ...ok, finish_date: "2026-02-01" })).rejects.toThrow(/after start_date/);
+    await expect(view.addTimeline({ ...ok, entries: [{ task: 99 }] })).rejects.toThrow(/unknown task/);
+    await expect(view.addTimeline(ok, 5)).rejects.toThrow(/position/);
+    expect(view.serialize()).toEqual(before);
   });
 });

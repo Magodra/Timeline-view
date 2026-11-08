@@ -22,8 +22,7 @@
         or remove the selected tasks or timelines with <code>removeTask</code> / <code>removeTimeline</code>.
         "Rename" renames the selected timeline with <code>renameTimeline</code>, or the view with
         <code>renameView</code> when no timeline is selected. "Add timeline" adds an empty timeline
-        with the name you type, spanning all the others; the library has no call for this yet, so
-        the page adds it to <code>serialize()</code> and loads the result with <code>parse()</code>.
+        with the name you type, spanning all the others, with <code>addTimeline</code>.
     </p>
     <!-- The whole row is the form (a form can't sit inside a <p>), so Enter in the
          name field adds the timeline; the other buttons are type="button". -->
@@ -136,8 +135,7 @@
             if (id === undefined) timeline.renameView(name);
             else timeline.renameTimeline(id, name);
         });
-        // Adds an empty timeline at the bottom, covering the range of all the
-        // others. There is no addTimeline call yet: change the data and parse it.
+        // Adds an empty timeline at the bottom, covering the range of all the others.
         const nameField = document.getElementById("new_timeline_name");
         const addButton = document.getElementById("add_timeline_button");
         nameField.addEventListener("input", () => {
@@ -154,14 +152,12 @@
             // ISO dates of the same form compare correctly as strings.
             const starts = data.timelines.map((t) => t.start_date).sort();
             const finishes = data.timelines.map((t) => t.finish_date).sort();
-            data.timelines.push({
+            timeline.addTimeline({
                 id: `timeline-${n}`,
                 name,
                 start_date: starts[0] ?? "2026-01-01",
-                finish_date: finishes[finishes.length - 1] ?? "2027-01-01",
-                entries: []
-            });
-            timeline.parse(data);   // keeps the selection
+                finish_date: finishes[finishes.length - 1] ?? "2027-01-01"
+            });   // at the bottom; addTimeline(data, 0) would put it at the top
             nameField.value = "";
             addButton.disabled = true;
             updateControls();

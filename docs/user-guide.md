@@ -315,18 +315,18 @@ Set `selection: false` in the view to turn selection off: clicks still fire `onT
 
 ## Renaming
 
-`timeline.renameView(name)` changes the view's name, shown as the heading (`""` removes the heading). `timeline.renameTimeline(id, name)` changes a timeline's name label. Both return `false` and do nothing when the name is unchanged, and throw for an unknown timeline or a name that isn't a string. They fire:
+`timeline.renameView(name)` changes the view's name, shown as the heading (`""` removes the heading). `timeline.renameTimeline(id, name)` changes a timeline's name label. Like all the view and timeline changes, they return a promise (see [Saving to a REST backend](#saving-to-a-rest-backend)): it resolves to `true`, or to `false` when the name is unchanged and nothing happened, and rejects for an unknown timeline or a name that isn't a string. They fire:
 
 | Event | Gets |
 |-------|------|
 | `view_renamed` | `{ name, old_name }` |
 | `timeline_renamed` | `{ timeline_id, name, old_name }` |
 
-The REST API has no calls for these yet, so with a backend, saving the new name is up to you. The component has no rename UI of its own; [examples/features.html](../examples/features.html) has a Rename button that asks for the selected timeline's name, or the view's when no timeline is selected.
+With a REST backend they are saved too (see [Saving to a REST backend](#saving-to-a-rest-backend)). The component has no rename UI of its own; [examples/features.html](../examples/features.html) has a Rename button that asks for the selected timeline's name, or the view's when no timeline is selected.
 
 ## Removing tasks and timelines
 
-`timeline.removeTask(id)` removes a task: from the tasks, and from every timeline it is on. The bar lines of those timelines are tidied up as after a move. `timeline.removeTimeline(id)` removes a timeline with its entries; its tasks stay in the data, even those that are now on no timeline. Both deselect what they remove, and throw for an unknown id.
+`timeline.removeTask(id)` removes a task: from the tasks, and from every timeline it is on. The bar lines of those timelines are tidied up as after a move. `timeline.removeTimeline(id)` removes a timeline with its entries; its tasks stay in the data, even those that are now on no timeline. Both deselect what they remove. `removeTask` throws for an unknown id; `removeTimeline` returns a promise, which rejects for one.
 
 They fire `task_removed` and `timeline_removed`:
 
@@ -335,7 +335,7 @@ They fire `task_removed` and `timeline_removed`:
 | `task_removed` | `{ task_id, task, timelines }`: the removed task's data, and the timelines it was on, as they are now. |
 | `timeline_removed` | `{ timeline_id, timeline, index, order }`: the removed timeline's data, its 0-based position before, and the remaining timelines' ids from top to bottom. |
 
-The REST API has no calls for these yet, so with a backend, saving the removal is up to you. The component has no remove buttons; [examples/features.html](../examples/features.html) adds one for the selection:
+With a REST backend, `removeTimeline` is saved too (see [Saving to a REST backend](#saving-to-a-rest-backend)); `removeTask` isn't yet, so save task removals yourself, for example in `task_removed`. The component has no remove buttons; [examples/features.html](../examples/features.html) adds one for the selection:
 
 ```js
 document.getElementById("remove").addEventListener("click", () => {
@@ -344,9 +344,20 @@ document.getElementById("remove").addEventListener("click", () => {
 });
 ```
 
+## Adding timelines
+
+`timeline.addTimeline(data, position)` adds a timeline, in the same format as in `timelines`, at a 0-based position in the stack; leave `position` out to add it at the bottom. `entries` may be left out for an empty timeline.
+
+```js
+timeline.addTimeline({ id: "qa", name: "QA", start_date: "2026-03-01", finish_date: "2026-09-01" });
+timeline.addTimeline({ id: "pm", name: "Management", start_date: "2026-01-01", finish_date: "2026-12-31" }, 0); // at the top
+```
+
+It fires `timeline_added` with `{ timeline_id, timeline, index, order }`. It returns a promise, which rejects without changing anything if the id is already used, or if the data is invalid in a way `parse()` would reject (missing dates, a finish before the start, an entry for an unknown task). [examples/features.html](../examples/features.html) has an "Add timeline" button with a name field.
+
 ## Reordering timelines
 
-`moveTimelineUp(id)` and `moveTimelineDown(id)` move a timeline one place in the stack; `moveTimeline(id, delta)` moves it any number of places (negative is up). They return `false` when the timeline is already at the top or bottom. Each move fires `timeline_moved` with `{ timeline_id, from_index, to_index, order }`: the 0-based positions before and after, and every timeline's id from top to bottom. The new order is also in `serialize()`. With a REST backend, saving the order is up to the host for now (for example in `timeline_moved`): the API has no call for it.
+`moveTimelineUp(id)` and `moveTimelineDown(id)` move a timeline one place in the stack; `moveTimeline(id, delta)` moves it any number of places (negative is up). They return a promise that resolves to `true`, or to `false` when the timeline is already at the top or bottom. Each move fires `timeline_moved` with `{ timeline_id, from_index, to_index, order }`: the 0-based positions before and after, and every timeline's id from top to bottom. The new order is also in `serialize()`. With a REST backend, each move is saved too.
 
 The component has no buttons for this; add your own, for example for the selected timeline (as in [examples/features.html](../examples/features.html), which also moves several selected timelines together):
 
@@ -372,8 +383,41 @@ timeline.on("task_removed", (e) => { /* e.task_id, e.task, e.timelines */ });
 timeline.on("timeline_removed", (e) => { /* e.timeline_id, e.timeline, e.index, e.order */ });
 timeline.on("view_renamed", (e) => { /* e.name, e.old_name */ });
 timeline.on("timeline_renamed", (e) => { /* e.timeline_id, e.name, e.old_name */ });
+timeline.on("timeline_added", (e) => { /* e.timeline_id, e.timeline, e.index, e.order */ });
+timeline.on("save_failed", (e) => { /* e.action, e.timeline_id, e.error; the view already shows the restored state */ });
 off(); // unsubscribe
 ```
+
+## Saving to a REST backend
+
+With `api_url` set (`timeline.init("timeline_here", { api_url })`), the view saves these changes itself, through the [REST API](api/openapi.yaml):
+
+| Change | Request |
+|--------|---------|
+| Moving an entry (dragging, or `moveEntry`) | `PATCH /views/{view_id}/timelines/{timeline_id}/entries/{task_id}` |
+| `renameView` | `PATCH /views/{view_id}` |
+| `addTimeline` | `POST /views/{view_id}/timelines` |
+| `renameTimeline`, `moveTimelineUp` / `moveTimelineDown` / `moveTimeline` | `PATCH /views/{view_id}/timelines/{timeline_id}` |
+| `removeTimeline` | `DELETE /views/{view_id}/timelines/{timeline_id}` |
+
+Each change shows at once and is sent in the background, one request at a time, in the order you made them. Every request carries the view's `version`, so the server can tell when someone else changed the view in the meantime: it then answers 409 with the current view, and the view shows that. If a request fails in any other way, the view goes back to how it was before that change (undoing the changes made after it too) and fires `move_failed` (entry moves) or `save_failed` (everything else). `await timeline.whenSaved()` waits until everything has been answered, for example before closing a page.
+
+Each of these calls (`moveEntry`, `renameView`, `addTimeline`, `renameTimeline`, the `moveTimeline` calls, `removeTimeline`) changes the view at once, before it returns, and returns a promise that settles when the change is saved; without a backend, at once. The promise rejects if the input is invalid (nothing changes), and if saving fails (the view is already restored, and `move_failed` or `save_failed` has fired). So you can either wait for each change, or fire and forget and listen for the failure events:
+
+```js
+try {
+  await timeline.renameTimeline("dev", "Engineering");
+  showMessage("Saved");
+} catch (error) {
+  showMessage(`Not saved: ${error.message}`);   // the old name is back on screen
+}
+
+// Or: don't wait, and report failures in one place.
+timeline.on("save_failed", (e) => showMessage(`Couldn't save (${e.action})`));
+timeline.moveTimelineUp("dev").catch(() => {});   // the rejection is handled by save_failed
+```
+
+Not saved yet: adding entries from outside the view (`addEntry`), removing tasks, and moving marker labels. Save those yourself from `entry_added`, `task_removed` and `marker_moved`.
 
 ## Theming
 

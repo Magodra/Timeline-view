@@ -13,11 +13,24 @@
     <p>
         The view loads from <code>GET /views/demo</code> and saves every callout move with
         <code>PATCH /views/demo/timelines/{timeline_id}/entries/{task_id}</code>.
-        The backend here is a mock running in the page, with 300 ms latency.
+        The buttons below rename the view (<code>PATCH /views/demo</code>), and add
+        (<code>POST /views/demo/timelines</code>), rename or move
+        (<code>PATCH /views/demo/timelines/{timeline_id}</code>) and remove
+        (<code>DELETE /views/demo/timelines/{timeline_id}</code>) timelines; click a timeline's name
+        to select it first. The backend here is a mock running in the page, with 300 ms latency.
     </p>
     <p class="controls">
-        <label><input type="checkbox" id="fail"> Make the server reject the next move (500)</label>
-        <button id="bump">Simulate an edit by someone else (next move gets 409)</button>
+        <input type="text" id="name" placeholder="Name" aria-label="Name">
+        <button type="button" id="rename_view">Rename view</button>
+        <button type="button" id="add_timeline">Add timeline</button>
+        <button type="button" id="rename_timeline">Rename timeline</button>
+        <button type="button" id="up">Move up</button>
+        <button type="button" id="down">Move down</button>
+        <button type="button" id="remove">Remove timeline</button>
+    </p>
+    <p class="controls">
+        <label><input type="checkbox" id="fail"> Make the server reject the next change (500)</label>
+        <button id="bump">Simulate an edit by someone else (next change gets 409)</button>
     </p>
     <div id="timeline_here" style="height: 420px;"></div>
     <h2>Requests</h2>
@@ -59,20 +72,45 @@
 
             if (init.method === "GET" && path === "/api/views/demo") return reply(200, server.toData());
 
-            const m = path.match(/^\/api\/views\/demo\/timelines\/([^/]+)\/entries\/([^/]+)$/);
-            if (init.method !== "PATCH" || !m) return reply(404, { error: "not found" });
+            // Every change carries the version the client last saw: in the body, or for DELETE in the query.
+            const { version, ...body } = init.body ? JSON.parse(init.body) : { version: Number(new URL(url).searchParams.get("version")) };
+            const route = (method, pattern) => init.method === method && path.match(pattern);
+            const entry = route("PATCH", /^\/api\/views\/demo\/timelines\/([^/]+)\/entries\/([^/]+)$/);
+            const viewPatch = route("PATCH", /^\/api\/views\/demo$/);
+            const add = route("POST", /^\/api\/views\/demo\/timelines$/);
+            const timelinePatch = route("PATCH", /^\/api\/views\/demo\/timelines\/([^/]+)$/);
+            const remove = route("DELETE", /^\/api\/views\/demo\/timelines\/([^/]+)$/);
+            if (!entry && !viewPatch && !add && !timelinePatch && !remove) return reply(404, { error: "not found" });
 
-            const { version, ...patch } = JSON.parse(init.body);
             if (version !== server.version) return reply(409, server.toData());
             if (document.getElementById("fail").checked) {
                 document.getElementById("fail").checked = false;
                 return reply(500, { error: "simulated failure" });
             }
+            const order = () => server.timelines.map((t) => t.id);
+            // Ids arrive as text in the path; the model compares ids as strings.
+            const id = (m) => decodeURIComponent(m[1]);
             try {
-                const changed = server.moveEntry(decodeURIComponent(m[1]), decodeURIComponent(m[2]),
-                    timeline.patchFromData(patch));
+                let result;
+                if (entry) {
+                    const changed = server.moveEntry(id(entry), decodeURIComponent(entry[2]), timeline.patchFromData(body));
+                    result = { timelines: changed.map(timeline.timelineToData) };
+                } else if (viewPatch) {
+                    if (body.name !== undefined) server.renameView(body.name);
+                    result = { view: server.toData().view };
+                } else if (add) {
+                    server.addTimeline(body.timeline, body.position);
+                    result = { order: order() };
+                } else if (timelinePatch) {
+                    if (body.name !== undefined) server.renameTimeline(id(timelinePatch), body.name);
+                    if (body.position !== undefined) server.setTimelinePosition(id(timelinePatch), body.position);
+                    result = { order: order() };
+                } else {
+                    server.removeTimeline(id(remove));
+                    result = { order: order() };
+                }
                 server.version += 1;
-                return reply(200, { version: server.version, timelines: changed.map(timeline.timelineToData) });
+                return reply(200, { version: server.version, ...result });
             } catch (error) {
                 const status = STATUS[error.code] ?? 500;
                 return reply(status, status === 409 ? server.toData() : { error: error.message });
@@ -87,7 +125,34 @@
         // ---- The page itself: point the view at the API. ----
         timeline.init("timeline_here", { api_url: "https://example.test/api", fetch: mockFetch });
         timeline.on("move_failed", (e) => write(`move_failed: ${e.error.message}`));
+        timeline.on("save_failed", (e) => write(`save_failed (${e.action}): ${e.error.message}`));
         timeline.load("demo");
+
+        // Timeline and view changes. Each one shows at once and is saved in the background.
+        const nameField = document.getElementById("name");
+        const selected = () => timeline.getSelectedTimelines()[0];
+        const name = () => nameField.value.trim();
+        let added = 0;
+        const actions = {
+            rename_view: () => name() && timeline.renameView(name()),
+            rename_timeline: () => selected() !== undefined && name() && timeline.renameTimeline(selected(), name()),
+            add_timeline: () => {
+                if (!name()) return;
+                const data = timeline.serialize();
+                while (data.timelines.some((t) => t.id === `new-${added}`)) added++;
+                timeline.addTimeline({ id: `new-${added}`, name: name(), start_date: "2026-03-01", finish_date: "2026-06-01" });
+            },
+            up: () => selected() !== undefined && timeline.moveTimelineUp(selected()),
+            down: () => selected() !== undefined && timeline.moveTimelineDown(selected()),
+            remove: () => selected() !== undefined && timeline.removeTimeline(selected())
+        };
+        // Each call returns a promise that settles when the change is saved. A failure is
+        // logged by save_failed above, so the rejection itself can be ignored here.
+        for (const [id, action] of Object.entries(actions)) {
+            document.getElementById(id).addEventListener("click", () => {
+                Promise.resolve(action()).catch(() => undefined);
+            });
+        }
     </script>
 </body>
 </html>

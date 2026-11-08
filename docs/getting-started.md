@@ -60,7 +60,7 @@ timeline.on("entry_moved", ({ timeline_id, task_id, patch }) => {
 });
 ```
 
-Or point the view at a backend that implements the [REST API](api/openapi.yaml):
+Or point the view at a backend that implements the [REST API](api/openapi.yaml); the view then saves moves, renames, and added, reordered and removed timelines itself:
 
 ```js
 timeline.init("timeline_here", { api_url: "https://example.com/api" });

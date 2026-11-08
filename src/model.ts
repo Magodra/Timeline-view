@@ -380,6 +380,47 @@ export class TimelineModel {
     return true;
   }
 
+  /**
+   * Adds a timeline (validated like loaded data: dates, entries for known
+   * tasks, ...) at `position` in the stack, 0-based; the bottom by default.
+   * Throws a `MoveError`: `conflict` for an id in use, `invalid` otherwise.
+   */
+  addTimeline(data: TimelineData, position = this.timelines.length): { timeline: Timeline; position: number } {
+    if (data === null || typeof data !== "object" || data.id === undefined || data.id === null) {
+      throw new MoveError("invalid", "A timeline needs an id");
+    }
+    if (this.findTimeline(data.id)) throw new MoveError("conflict", `Timeline ${data.id} already exists`);
+    if (!Number.isInteger(position) || position < 0 || position > this.timelines.length) {
+      throw new MoveError("invalid", `position must be a whole number from 0 to ${this.timelines.length}`);
+    }
+    let timeline: Timeline;
+    try {
+      timeline = this.timelineFromData({ ...data, entries: data.entries ?? [] });
+    } catch (error) {
+      throw new MoveError("invalid", error instanceof Error ? error.message : String(error));
+    }
+    trimLines(timeline);
+    this.timelines.splice(position, 0, timeline);
+    return { timeline, position };
+  }
+
+  /**
+   * Puts a timeline at `position` in the stack (0-based), as the REST API's
+   * timeline PATCH does. Throws a `MoveError` for an unknown id or a position
+   * out of range. Returns false if it is already there.
+   */
+  setTimelinePosition(id: Id, position: number): boolean {
+    const from = this.timelines.findIndex((t) => sameId(t.id, id));
+    if (from < 0) throw new MoveError("not_found", `Timeline ${id} not found`);
+    if (!Number.isInteger(position) || position < 0 || position >= this.timelines.length) {
+      throw new MoveError("invalid", `position must be a whole number from 0 to ${this.timelines.length - 1}`);
+    }
+    if (position === from) return false;
+    const [timeline] = this.timelines.splice(from, 1);
+    this.timelines.splice(position, 0, timeline);
+    return true;
+  }
+
   /** Sets the view's name (the heading; "" for none). Returns the old name. */
   renameView(name: string): string {
     if (typeof name !== "string") throw new MoveError("invalid", "name must be a string");

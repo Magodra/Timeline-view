@@ -88,6 +88,24 @@ export interface TimelineRenamedEvent {
   old_name: string;
 }
 
+export interface TimelineAddedEvent {
+  timeline_id: Id;
+  /** The added timeline, in the data format. */
+  timeline: TimelineData;
+  /** Its 0-based position in the stack. */
+  index: number;
+  /** Every timeline's id, top to bottom. */
+  order: Id[];
+}
+
+export interface SaveFailedEvent {
+  action: SaveAction;
+  /** The timeline the change was for; not set for `rename_view`. */
+  timeline_id?: Id;
+  /** An `ApiError` (with `status` and `body`) for a rejected request, or the network error. */
+  error: unknown;
+}
+
 export interface TimelineEvents {
   /** A move was applied on screen. Fired before the REST request, if any, is sent. */
   entry_moved: EntryMovedEvent;
@@ -106,19 +124,30 @@ export interface TimelineEvents {
   entry_added: EntryAddedEvent;
   /**
    * A timeline was moved in the stack (`moveTimeline`, `moveTimelineUp`,
-   * `moveTimelineDown`). There is no REST call for the order yet, so saving
-   * it is up to the host.
+   * `moveTimelineDown`). With a REST backend the new position is saved too.
    */
   timeline_moved: TimelineMovedEvent;
   /** A task was removed with `removeTask`. No REST call yet: saving it is up to the host. */
   task_removed: TaskRemovedEvent;
-  /** A timeline was removed with `removeTimeline`. No REST call yet: saving it is up to the host. */
+  /** A timeline was removed with `removeTimeline`. With a REST backend it is saved too. */
   timeline_removed: TimelineRemovedEvent;
-  /** The view's name was changed with `renameView`. No REST call yet: saving it is up to the host. */
+  /** The view's name was changed with `renameView`. With a REST backend it is saved too. */
   view_renamed: ViewRenamedEvent;
-  /** A timeline's name was changed with `renameTimeline`. No REST call yet: saving it is up to the host. */
+  /** A timeline's name was changed with `renameTimeline`. With a REST backend it is saved too. */
   timeline_renamed: TimelineRenamedEvent;
+  /** A timeline was added with `addTimeline`. */
+  timeline_added: TimelineAddedEvent;
+  /**
+   * Saving a view or timeline change (rename, add, move, remove) to the REST
+   * backend failed. The view already shows the restored state: rolled back,
+   * or the server's current view after a 409. Entry moves report
+   * `move_failed` instead.
+   */
+  save_failed: SaveFailedEvent;
 }
+
+/** What a failed save was for. */
+export type SaveAction = "rename_view" | "add_timeline" | "rename_timeline" | "move_timeline" | "remove_timeline";
 
 type Handler<T> = (event: T) => void;
 
@@ -319,35 +348,80 @@ export class TimelineView {
     this.emit("marker_moved", { marker_id: marker.id, marker_offset: { ...marker.offset } });
   }
 
+  /*
+   * The view and timeline changes below work like `moveEntry`: the change is
+   * applied and shown at once (before the promise settles), and the promise
+   * settles when it is saved: at once without a REST backend. It rejects,
+   * changing nothing, for invalid input (a `MoveError`), and after a failed
+   * save (rolled back, or re-rendered from a 409), which also fires
+   * `save_failed`.
+   */
+
   /**
    * Sets the view's name, shown as the heading ("" for no heading), and
-   * fires `view_renamed`. Returns false, without the event, if the name is
-   * unchanged. Throws a `MoveError` (`invalid`) if `name` isn't a string.
-   * Not sent to the REST API.
+   * fires `view_renamed`. Resolves to false, without the event, if the name
+   * is unchanged. Rejects with a `MoveError` (`invalid`) if `name` isn't a
+   * string. With a REST backend, saves it with `PATCH /views/{view_id}`.
    */
-  renameView(name: string): boolean {
+  async renameView(name: string): Promise<boolean> {
     const model = this.requireModel();
     if (model.view.name === name) return false;
+    const snapshot = model.toData();
     const old = model.renameView(name);
     this.render();
     this.emit("view_renamed", { name, old_name: old });
+    await this.saveChange(snapshot, "rename_view", undefined, (api, viewId, version) =>
+      api.updateView(viewId, { name }, version),
+    );
     return true;
   }
 
   /**
-   * Sets a timeline's name and fires `timeline_renamed`. Returns false,
-   * without the event, if the name is unchanged. Throws a `MoveError`
+   * Sets a timeline's name and fires `timeline_renamed`. Resolves to false,
+   * without the event, if the name is unchanged. Rejects with a `MoveError`
    * (`not_found` or `invalid`) for an unknown id or a `name` that isn't a
-   * string. Not sent to the REST API.
+   * string. With a REST backend, saves it with
+   * `PATCH /views/{view_id}/timelines/{timeline_id}`.
    */
-  renameTimeline(id: Id, name: string): boolean {
+  async renameTimeline(id: Id, name: string): Promise<boolean> {
     const model = this.requireModel();
     const current = model.findTimeline(id);
     if (current && current.name === name) return false;
+    const snapshot = model.toData();
     const { timeline, old } = model.renameTimeline(id, name);
     this.render();
     this.emit("timeline_renamed", { timeline_id: timeline.id, name, old_name: old });
+    await this.saveChange(snapshot, "rename_timeline", timeline.id, (api, viewId, version) =>
+      api.updateTimeline(viewId, timeline.id, { name }, version),
+    );
     return true;
+  }
+
+  /**
+   * Adds a timeline, in the data format (`{ id, name, start_date,
+   * finish_date, entries }`; `entries` may be left out for an empty one), at
+   * `position` in the stack (0-based; the bottom by default). Fires
+   * `timeline_added`. Rejects with a `MoveError`, changing nothing:
+   * `conflict` for an id that is in use, `invalid` for bad data or a bad
+   * position (whatever `parse()` would reject, such as an entry for an
+   * unknown task). With a REST backend, saves it with
+   * `POST /views/{view_id}/timelines`.
+   */
+  async addTimeline(data: TimelineData, position?: number): Promise<void> {
+    const model = this.requireModel();
+    const snapshot = model.toData();
+    const { timeline, position: at } = model.addTimeline(data, position);
+    this.render();
+    const added = timelineToData(timeline);
+    this.emit("timeline_added", {
+      timeline_id: timeline.id,
+      timeline: added,
+      index: at,
+      order: model.timelines.map((t) => t.id),
+    });
+    await this.saveChange(snapshot, "add_timeline", timeline.id, (api, viewId, version) =>
+      api.addTimeline(viewId, added, at, version),
+    );
   }
 
   /**
@@ -370,11 +444,13 @@ export class TimelineView {
   /**
    * Removes a timeline and its entries. Its tasks stay in the data, also
    * those that are on no other timeline now. Deselects it, and fires
-   * `timeline_removed`. Throws a `MoveError` (`not_found`) for an unknown id.
-   * Not sent to the REST API.
+   * `timeline_removed`. Rejects with a `MoveError` (`not_found`) for an
+   * unknown id. With a REST backend, saves it with
+   * `DELETE /views/{view_id}/timelines/{timeline_id}`.
    */
-  removeTimeline(id: Id): void {
+  async removeTimeline(id: Id): Promise<void> {
     const model = this.requireModel();
+    const snapshot = model.toData();
     const { timeline, index } = model.removeTimeline(id);
     this.render();
     this.dropStaleSelection();
@@ -384,27 +460,33 @@ export class TimelineView {
       index,
       order: model.timelines.map((t) => t.id),
     });
+    await this.saveChange(snapshot, "remove_timeline", timeline.id, (api, viewId, version) =>
+      api.removeTimeline(viewId, timeline.id, version),
+    );
   }
 
-  /** Moves a timeline one place up the stack. Returns false if it is already at the top. */
-  moveTimelineUp(id: Id): boolean {
+  /** Moves a timeline one place up the stack. Resolves to false if it is already at the top. */
+  moveTimelineUp(id: Id): Promise<boolean> {
     return this.moveTimeline(id, -1);
   }
 
-  /** Moves a timeline one place down the stack. Returns false if it is already at the bottom. */
-  moveTimelineDown(id: Id): boolean {
+  /** Moves a timeline one place down the stack. Resolves to false if it is already at the bottom. */
+  moveTimelineDown(id: Id): Promise<boolean> {
     return this.moveTimeline(id, 1);
   }
 
   /**
-   * Moves a timeline `delta` places: negative is up, positive down. Returns
-   * false, changing nothing, past the top or bottom. The new order shows in
-   * `serialize()`; the REST API has no call for it yet.
+   * Moves a timeline `delta` places: negative is up, positive down. Resolves
+   * to false, changing nothing, past the top or bottom. Fires
+   * `timeline_moved`. Rejects with a `MoveError` (`not_found`) for an
+   * unknown id. With a REST backend, saves the new position with
+   * `PATCH /views/{view_id}/timelines/{timeline_id}`.
    */
-  moveTimeline(id: Id, delta: number): boolean {
+  async moveTimeline(id: Id, delta: number): Promise<boolean> {
     const model = this.requireModel();
     const index = (timelineId: Id) => model.timelines.findIndex((t) => String(t.id) === String(timelineId));
     const from = index(id);
+    const snapshot = model.toData();
     const moved = model.moveTimeline(id, delta);
     if (!moved) return false;
     this.render();
@@ -415,6 +497,9 @@ export class TimelineView {
       to_index: from + delta,
       order: model.timelines.map((t) => t.id),
     });
+    await this.saveChange(snapshot, "move_timeline", timeline.id, (api, viewId, version) =>
+      api.updateTimeline(viewId, timeline.id, { position: from + delta }, version),
+    );
     return true;
   }
 
@@ -435,14 +520,51 @@ export class TimelineView {
     }
     this.render();
     this.emit("entry_moved", event);
+    return this.save(
+      snapshot,
+      (api, viewId, version) => api.moveEntry(viewId, timelineId, taskId, patch, version),
+      (error) => this.emit("move_failed", { ...event, error }),
+      (result, isLast) => {
+        // Later changes are already on screen; their own responses will catch up.
+        if (!isLast) return;
+        this.model!.replaceTimelines(result.timelines);
+        this.render();
+      },
+    );
+  }
 
-    if (!this.api) return;
-    const viewId = model.view.id;
+  /**
+   * Resolves when every change made so far has been sent to the REST backend
+   * and answered, or has failed (failures are reported through `move_failed`
+   * and `save_failed`). Resolves at once without a backend.
+   */
+  whenSaved(): Promise<void> {
+    return this.queue.then(() => undefined);
+  }
+
+  /**
+   * Sends a change that is already on screen to the REST backend, after the
+   * changes queued before it, one request at a time. `send` makes the request
+   * with the view's version at that moment; `onResult` gets the response
+   * (`isLast`: no other change is waiting). On failure, a 409 with the
+   * current view re-renders from it; anything else rolls back to `snapshot`
+   * (the state before this change), which also undoes the changes queued
+   * after it: they are cancelled. Then `fail` reports it. Without a backend
+   * this does nothing.
+   */
+  private save<R extends { version: number }>(
+    snapshot: TimelineViewData,
+    send: (api: RestClient, viewId: Id, version: number | undefined) => Promise<R>,
+    fail: (error: unknown) => void,
+    onResult?: (result: R, isLast: boolean) => void,
+  ): Promise<void> {
+    if (!this.api) return Promise.resolve();
+    const viewId = this.requireModel().view.id;
     if (viewId === undefined) {
       const error = new Error("view.id is required when api_url is set");
       this.rollback(snapshot);
-      this.emit("move_failed", { ...event, error });
-      throw error;
+      fail(error);
+      return Promise.reject(error);
     }
 
     const api = this.api;
@@ -451,14 +573,10 @@ export class TimelineView {
     const request = this.queue.then(async () => {
       try {
         if (generation !== this.generation) throw new MoveCancelledError();
-        const result = await api.moveEntry(viewId, timelineId, taskId, patch, this.model?.version);
+        const result = await send(api, viewId, this.model?.version);
         if (generation !== this.generation) return;
         this.model!.version = result.version;
-        // Later moves are already on screen; their own responses will catch up.
-        if (this.pending === 1) {
-          this.model!.replaceTimelines(result.timelines);
-          this.render();
-        }
+        onResult?.(result, this.pending === 1);
       } catch (error) {
         if (error instanceof MoveCancelledError) throw error;
         this.generation++;
@@ -467,7 +585,7 @@ export class TimelineView {
         } else {
           this.rollback(snapshot);
         }
-        this.emit("move_failed", { ...event, error });
+        fail(error);
         throw error;
       } finally {
         this.pending--;
@@ -475,6 +593,21 @@ export class TimelineView {
     });
     this.queue = request.catch(() => undefined);
     return request;
+  }
+
+  /**
+   * Saves a view or timeline change. A failure fires `save_failed` and
+   * rejects the returned promise, as `move_failed` and `moveEntry` do.
+   */
+  private saveChange<R extends { version: number }>(
+    snapshot: TimelineViewData,
+    action: SaveAction,
+    timelineId: Id | undefined,
+    send: (api: RestClient, viewId: Id, version: number | undefined) => Promise<R>,
+  ): Promise<void> {
+    const fail = (error: unknown) =>
+      this.emit("save_failed", { action, ...(timelineId !== undefined && { timeline_id: timelineId }), error });
+    return this.save(snapshot, send, fail);
   }
 
   /**
