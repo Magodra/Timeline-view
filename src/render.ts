@@ -44,9 +44,57 @@ export function render(root: HTMLElement, model: TimelineModel): void {
     title.setAttribute("aria-level", "2");
     root.prepend(title);
   }
-  layoutConnectors(root);
-  layoutMarkerLines(root);
+  layout(root);
   watchLayout(root);
+}
+
+/**
+ * The parts of the layout that depend on measured sizes: connector angles
+ * (label widths), which tick labels fit (the bar's width), and marker lines
+ * (the bars' positions). Runs after every render, and again whenever the view
+ * or a timeline changes size or fonts finish loading. Does nothing while the
+ * view is hidden (`display: none`, as in an inactive tab): nothing can be
+ * measured then, and showing it again changes its size, which lays it out.
+ */
+export function layout(root: HTMLElement): void {
+  if (!root.isConnected || (root.offsetWidth === 0 && root.offsetHeight === 0 && root.getClientRects().length === 0)) {
+    return;
+  }
+  layoutConnectors(root);
+  layoutTicks(root);
+  layoutMarkerLines(root);
+}
+
+/** Space, in px, kept between two tick labels. */
+const TICK_GAP = 4;
+
+/**
+ * Hides tick labels that would overlap others, so a narrow bar shows every
+ * second (or third, ...) label instead of a jumble. Major labels (with the
+ * year or date, `.tlv-tick--major`) are placed first so the context stays,
+ * from right to left: when the first label (which also shows the year) and a
+ * new year's label next to it collide, the new year wins. The rest then fill
+ * the room between them, from left to right. Measures all
+ * labels first, then hides, so the browser lays out only once.
+ */
+function layoutTicks(root: HTMLElement): void {
+  for (const scale of root.querySelectorAll<HTMLElement>(".tlv-scale")) {
+    const ticks = [...scale.querySelectorAll<HTMLElement>(".tlv-tick")];
+    for (const tick of ticks) tick.hidden = false;
+    const boxes = ticks.map((tick) => tick.getBoundingClientRect());
+    const placed: { left: number; right: number }[] = [];
+    const fits = (b: DOMRect) => placed.every((p) => b.left >= p.right + TICK_GAP || b.right + TICK_GAP <= p.left);
+    const show = new Set<number>();
+    const place = (i: number) => {
+      if (!fits(boxes[i])) return;
+      placed.push(boxes[i]);
+      show.add(i);
+    };
+    const isMajor = (i: number) => ticks[i].classList.contains("tlv-tick--major");
+    for (let i = ticks.length - 1; i >= 0; i--) if (isMajor(i)) place(i);
+    for (let i = 0; i < ticks.length; i++) if (!isMajor(i)) place(i);
+    ticks.forEach((tick, i) => (tick.hidden = !show.has(i)));
+  }
 }
 
 /**
@@ -265,17 +313,26 @@ export function layoutMarkerLines(root: HTMLElement): void {
   }
 }
 
-/** Keeps marker lines placed when the view or its timelines change size (resize, fonts loading). */
+/**
+ * Lays the view out again when it or one of its timelines changes size: the
+ * host resizing the container (a split or docking panel being dragged), the
+ * window resizing, the view being shown after being hidden, or fonts loading.
+ */
 const observers = new WeakMap<HTMLElement, ResizeObserver>();
 function watchLayout(root: HTMLElement): void {
+  // Labels are measured; web fonts that arrive later change their widths.
+  if (typeof document !== "undefined" && document.fonts?.status === "loading") {
+    document.fonts.ready.then(() => layout(root)).catch(() => undefined);
+  }
   if (typeof ResizeObserver === "undefined") return;
   let observer = observers.get(root);
   if (!observer) {
-    observer = new ResizeObserver(() => layoutMarkerLines(root));
+    // The layout only moves absolutely positioned parts and hides tick
+    // labels, which changes no observed size, so it can't loop.
+    observer = new ResizeObserver(() => layout(root));
     observers.set(root, observer);
   }
   observer.disconnect();
-  if (!root.querySelector(":scope > .tlv-marker-line")) return;
   observer.observe(root);
   for (const row of root.querySelectorAll(".tlv-timeline")) observer.observe(row);
 }
@@ -377,7 +434,7 @@ function renderBar(model: TimelineModel, timeline: Timeline): HTMLElement {
   }
   for (const tick of tickList) {
     if (tick.at >= 1) continue;
-    const t = el("span", "tlv-tick", tick.label);
+    const t = el("span", tick.major ? "tlv-tick tlv-tick--major" : "tlv-tick", tick.label);
     t.style.left = pct(tick.at);
     scaleRow.append(t);
   }

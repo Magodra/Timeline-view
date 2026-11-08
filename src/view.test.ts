@@ -849,3 +849,89 @@ describe("renaming", () => {
     expect(() => view.renameView(null as unknown as string)).toThrow(/string/);
   });
 });
+
+describe("resizing", () => {
+  const rect = (left: number, width: number) =>
+    ({ left, right: left + width, width, top: 0, bottom: 10, height: 10, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+
+  /** Pretends the view is shown, and puts tick labels `width` px wide at `step` px intervals. */
+  function fakeLayout(step: number, width: number) {
+    container.getClientRects = () => [rect(0, 1000)] as unknown as DOMRectList;
+    container.querySelectorAll<HTMLElement>(".tlv-tick").forEach((tick, i) => {
+      tick.getBoundingClientRect = () => rect(i * step, width);
+    });
+  }
+  const shown = () => [...container.querySelectorAll<HTMLElement>(".tlv-tick")].map((t) => !t.hidden);
+
+  it("watches the view and every timeline for size changes, also without markers", () => {
+    const observed: Element[] = [];
+    let callback: () => void = () => undefined;
+    const original = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(cb: () => void) {
+        callback = cb;
+      }
+      observe(el: Element) {
+        observed.push(el);
+      }
+      disconnect() {
+        observed.length = 0;
+      }
+      unobserve() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      const view = new TimelineView("tl");
+      view.parse(sample());
+      expect(observed).toEqual([container, container.querySelector(".tlv-timeline")]);
+
+      // A resize lays the view out again: here, a narrower bar hides tick labels.
+      fakeLayout(20, 30);
+      callback();
+      expect(shown().filter(Boolean).length).toBeLessThan(shown().length);
+      view.destroy();
+      expect(observed).toEqual([]);
+    } finally {
+      globalThis.ResizeObserver = original;
+    }
+  });
+
+  it("hides tick labels that would overlap the one shown before them, and shows them again when there is room", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    const count = container.querySelectorAll(".tlv-tick").length;
+    expect(count).toBeGreaterThan(4);
+
+    fakeLayout(20, 30); // each label overlaps the next: every second one shows
+    view.resize();
+    expect(shown()).toEqual(Array.from({ length: count }, (_, i) => i % 2 === 0));
+
+    fakeLayout(100, 30); // room for all
+    view.resize();
+    expect(shown().every(Boolean)).toBe(true);
+  });
+
+  it("keeps the labels with the year first, preferring a new year over the first label", () => {
+    const view = new TimelineView("tl");
+    const data = sample();
+    data.view.scale = "month";
+    // Ticks: Dec 2026 (first), Jan 2027 (new year), Feb, Mar, Apr, May.
+    data.timelines[0].start_date = "2026-12-01";
+    data.timelines[0].finish_date = "2027-06-01";
+    data.tasks = [];
+    data.timelines[0].entries = [];
+    view.parse(data);
+    const labels = () => [...container.querySelectorAll<HTMLElement>(".tlv-tick")].filter((t) => !t.hidden).map((t) => t.textContent);
+    fakeLayout(20, 30);
+    view.resize();
+    expect(labels()).toEqual(["Jan 2027", "Mar", "May"]);
+  });
+
+  it("leaves the layout alone while the view is hidden", () => {
+    const view = new TimelineView("tl");
+    view.parse(sample());
+    fakeLayout(20, 30);
+    container.getClientRects = () => [] as unknown as DOMRectList; // display: none
+    view.resize();
+    expect(shown().every(Boolean)).toBe(true);
+  });
+});

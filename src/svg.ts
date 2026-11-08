@@ -210,7 +210,8 @@ function drawBar(out: SvgWriter, bar: HTMLElement): void {
     out.add(`<line x1="${num(sb.x)}" y1="${num(y)}" x2="${num(sb.x + sb.width)}" y2="${num(y)}" stroke="${color}"/>`);
   line(sb.y + sb.height - 0.5, scaleStyle.borderBottomColor);
   out.add("</g>");
-  for (const tick of scale.querySelectorAll<HTMLElement>(".tlv-tick")) out.text(tick, sb);
+  // Tick labels that the layout hid for lack of room stay out, as on screen.
+  for (const tick of scale.querySelectorAll<HTMLElement>(".tlv-tick")) if (!tick.hidden) out.text(tick, sb);
 
   // Tasks and milestones on the bar lines.
   for (const task of bar.querySelectorAll<HTMLElement>(".tlv-task")) {

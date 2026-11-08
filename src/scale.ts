@@ -7,6 +7,12 @@ export interface Tick {
   at: number;
   label: string;
   /**
+   * The label carries context (the year on a month scale, the date on an
+   * hour scale): the first tick, and each tick that starts a new year or day.
+   * When labels don't all fit, these are kept first.
+   */
+  major: boolean;
+  /**
    * Running number of the period that starts at this tick, counted from a
    * fixed date. Its parity shades periods alternately, the same way on every
    * timeline whatever its start date.
@@ -94,12 +100,19 @@ export function periodSerial(date: Date, scale: Scale): number {
   }
 }
 
-/** `isFirst`: the first tick shows the year (month scale) or date (hour scale) for context. */
-function label(date: Date, scale: Scale, isFirst: boolean): string {
+/** Whether a tick's label carries context: the first one, or the start of a new day (hour scale) or year (month scale). */
+function isMajor(date: Date, scale: Scale, isFirst: boolean): boolean {
+  if (scale === "hour") return isFirst || date.getUTCHours() === 0;
+  if (scale === "month") return isFirst || date.getUTCMonth() === 0;
+  return false;
+}
+
+/** A major tick shows the year (month scale) or date (hour scale) for context. */
+function label(date: Date, scale: Scale, major: boolean): string {
   switch (scale) {
     case "hour": {
       const time = `${String(date.getUTCHours()).padStart(2, "0")}:00`;
-      return isFirst || date.getUTCHours() === 0 ? `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${time}` : time;
+      return major ? `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${time}` : time;
     }
     case "day":
       return String(date.getUTCDate());
@@ -107,7 +120,7 @@ function label(date: Date, scale: Scale, isFirst: boolean): string {
       return `W${isoWeek(date)}`;
     case "month": {
       const month = MONTHS[date.getUTCMonth()];
-      return isFirst || date.getUTCMonth() === 0 ? `${month} ${date.getUTCFullYear()}` : month;
+      return major ? `${month} ${date.getUTCFullYear()}` : month;
     }
     case "year":
       return String(date.getUTCFullYear());
@@ -118,10 +131,12 @@ function label(date: Date, scale: Scale, isFirst: boolean): string {
 export function ticks(start: Date, finish: Date, scale: Scale): Tick[] {
   const result: Tick[] = [];
   for (let d = firstBoundary(start, scale); d <= finish && result.length < MAX_TICKS; d = next(d, scale)) {
+    const major = isMajor(d, scale, result.length === 0);
     result.push({
       date: d,
       at: fraction(d, start, finish),
-      label: label(d, scale, result.length === 0),
+      label: label(d, scale, major),
+      major,
       serial: periodSerial(d, scale),
     });
   }

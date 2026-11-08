@@ -150,6 +150,33 @@ The container's size never changes the time scale's dates or the callout offsets
 <div id="timeline_here" style="max-height: 600px;"></div>
 ```
 
+### Resizing, and docking panels
+
+The view follows its container's size by itself. When the container changes size (the window is resized, a split pane or docking panel is dragged, a sidebar opens), the bars stretch or shrink with it and everything that depends on the width is laid out again: marker lines, label connectors, and which time-scale labels are shown. When the bars get too narrow for every label, some are left out (every second one, and so on); labels with the year (month scale) or the date (hour scale) are kept first, so you can still tell where you are.
+
+A view that is hidden (`display: none`), as in an inactive tab, is laid out when it is shown again. You can create and fill a view while it is hidden.
+
+In a docking layout such as [dockview](https://dockview.dev), give the view's element `height: 100%` so it fills the panel and scrolls inside it:
+
+```js
+// A dockview panel that shows a timeline view.
+class TimelinePanel {
+  constructor() {
+    this.element = document.createElement("div");
+    this.element.style.height = "100%";
+  }
+  init(params) {
+    this.view = new timeline.TimelineView(this.element);
+    this.view.parse(params.params.data);
+  }
+  dispose() {
+    this.view.destroy();
+  }
+}
+```
+
+Nothing else is needed: the view notices the panel's size changes and tab switches itself. If you want to trigger the layout yourself, for example from your docking library's resize callback, call `view.resize()`. It is cheap (it doesn't rebuild the view) and does nothing while the view is hidden.
+
 ### Markers
 
 A **marker** marks a date with a vertical line across the bars, such as "Today" or a deadline. Markers are listed in `markers`:

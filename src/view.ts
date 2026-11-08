@@ -1,7 +1,7 @@
 import { ApiError, RestClient } from "./api";
 import { attachDrag, calloutOffset, hitTarget, targetElement, type DropEvent, type DropTarget, type MarkerDropEvent } from "./drag";
 import { patchFromData, taskFromData, taskToData, TimelineModel, timelineToData, type Task } from "./model";
-import { attachAt, render, unwatchLayout } from "./render";
+import { attachAt, layout, render, unwatchLayout } from "./render";
 import { toSVG } from "./svg";
 import type {
   EntryTargetData,
@@ -560,6 +560,18 @@ export class TimelineView {
       entry,
       timeline,
     });
+  }
+
+  /**
+   * Lays the view out again for its container's current size. The view does
+   * this by itself when the container changes size or is shown after being
+   * hidden (with `ResizeObserver`, in every supported browser), so this is
+   * only needed where that can't be seen, or to be explicit, for example from
+   * a docking library's resize callback. Does nothing while the view is
+   * hidden. Cheap: it doesn't rebuild the DOM.
+   */
+  resize(): void {
+    if (this.model) layout(this.container);
   }
 
   /** Removes the view's DOM and event listeners. */
