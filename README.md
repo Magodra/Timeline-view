@@ -2,7 +2,7 @@
 
 A timeline view for web planning applications. Framework-free TypeScript with no runtime dependencies.
 
-![Two timelines with task bars, milestones and callouts above and below the bars](https://github.com/Magodra/ar-timeline-view/raw/refs/tags/v1.2.1/docs/images/features.svg)
+![Two timelines with task bars, milestones and callouts above and below the bars](https://github.com/Magodra/ar-timeline-view/raw/refs/tags/v1.3.0/docs/images/features.svg)
 
 - Several timelines stacked in one view, each with its own date range, on an hour, day, week, month or year scale.
 - Relative timelines that each fill the width, or absolute ones on a common time axis.
@@ -17,7 +17,7 @@ A timeline view for web planning applications. Framework-free TypeScript with no
 - Export as SVG (`toSVG()`).
 - Optional REST backend for saving moves, with optimistic updates and rollback.
 
-**Documentation:** [getting started](https://github.com/Magodra/ar-timeline-view/blob/v1.2.1/docs/getting-started.md) · [user guide](https://github.com/Magodra/ar-timeline-view/blob/v1.2.1/docs/user-guide.md) · [developer guide](https://github.com/Magodra/ar-timeline-view/blob/v1.2.1/docs/developer-guide.md) · [REST API](https://github.com/Magodra/ar-timeline-view/blob/v1.2.1/docs/api/openapi.yaml)
+**Documentation:** [getting started](https://github.com/Magodra/ar-timeline-view/blob/v1.3.0/docs/getting-started.md) · [user guide](https://github.com/Magodra/ar-timeline-view/blob/v1.3.0/docs/user-guide.md) · [developer guide](https://github.com/Magodra/ar-timeline-view/blob/v1.3.0/docs/developer-guide.md) · [REST API](https://github.com/Magodra/ar-timeline-view/blob/v1.3.0/docs/api/openapi.yaml)
 
 ## Install
 
@@ -92,11 +92,11 @@ The UMD build sets a global `timeline` object with a default instance:
 
 Either example renders this:
 
-![One timeline with a task bar and a milestone callout below it](https://github.com/Magodra/ar-timeline-view/raw/refs/tags/v1.2.1/docs/images/basic.svg)
+![One timeline with a task bar and a milestone callout below it](https://github.com/Magodra/ar-timeline-view/raw/refs/tags/v1.3.0/docs/images/basic.svg)
 
 With `view.absolute: true`, timelines with different date ranges share one time axis:
 
-![Three timelines with different date ranges on a common time axis; tasks that continue past a range end in arrows](https://github.com/Magodra/ar-timeline-view/raw/refs/tags/v1.2.1/docs/images/absolute.svg)
+![Three timelines with different date ranges on a common time axis; tasks that continue past a range end in arrows](https://github.com/Magodra/ar-timeline-view/raw/refs/tags/v1.3.0/docs/images/absolute.svg)
 
 ## Save changes
 
@@ -108,7 +108,7 @@ timeline.on("entry_moved", ({ timeline_id, task_id, patch }) => {
 });
 ```
 
-Or point it at a backend that implements the [REST API](https://github.com/Magodra/ar-timeline-view/raw/refs/tags/v1.2.1/docs/api/openapi.yaml):
+Or point it at a backend that implements the [REST API](https://github.com/Magodra/ar-timeline-view/raw/refs/tags/v1.3.0/docs/api/openapi.yaml):
 
 ```js
 timeline.init("timeline_here", { api_url: "https://example.com/api" });
@@ -129,7 +129,7 @@ Works in current evergreen browsers (Chrome, Edge, Firefox, Safari).
 
 ## Links
 
-- Documentation: <https://github.com/Magodra/ar-timeline-view/tree/v1.2.1/>
+- Documentation: <https://github.com/Magodra/ar-timeline-view/tree/v1.3.0/>
 - Source and issues: <https://github.com/Magodra/ar-timeline-view>
 
 ## License
